@@ -38,6 +38,15 @@ public class CoreApi {
         return store.organization(store.createOrganization(input.name(), input.slug()));
     }
 
+    @GetMapping(value="/me", produces=MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, String> me() { return Map.of("sub", store.currentUser()); }
+
+    @GetMapping(value="/organizations", produces=MediaType.APPLICATION_JSON_VALUE)
+    public String organizations() { return store.organizations(); }
+
+    @GetMapping(value="/organizations/{organizationId}/projects", produces=MediaType.APPLICATION_JSON_VALUE)
+    public String organizationProjects(@PathVariable UUID organizationId) { return store.organizationProjects(organizationId); }
+
     @PostMapping(value="/organizations/{organizationId}/projects", produces=MediaType.APPLICATION_JSON_VALUE)
     public String project(@PathVariable UUID organizationId, @Valid @RequestBody ProjectInput input) {
         return store.project(store.createProject(organizationId, input.name(), input.slug()));
@@ -50,6 +59,9 @@ public class CoreApi {
     public Map<String, String> member(@PathVariable UUID projectId, @Valid @RequestBody MemberInput input) {
         store.addMember(projectId, input.userSub(), input.displayName()); return Map.of("status", "ADDED");
     }
+
+    @GetMapping(value="/projects/{projectId}/members", produces=MediaType.APPLICATION_JSON_VALUE)
+    public String members(@PathVariable UUID projectId) { return store.members(projectId); }
 
     @PostMapping(value="/projects/{projectId}/workspaces", produces=MediaType.APPLICATION_JSON_VALUE)
     public String workspace(@PathVariable UUID projectId, @Valid @RequestBody WorkspaceInput input) {
@@ -85,6 +97,9 @@ public class CoreApi {
 
     @GetMapping(value="/projects/{projectId}/agents", produces=MediaType.APPLICATION_JSON_VALUE)
     public String agents(@PathVariable UUID projectId) { return store.agents(projectId); }
+
+    @GetMapping(value="/projects/{projectId}/orchestrators", produces=MediaType.APPLICATION_JSON_VALUE)
+    public String orchestrators(@PathVariable UUID projectId) { return store.orchestrators(projectId); }
 
     @PostMapping(value="/projects/{projectId}/tasks", produces=MediaType.APPLICATION_JSON_VALUE)
     public String task(@PathVariable UUID projectId, @Valid @RequestBody TaskInput input) {

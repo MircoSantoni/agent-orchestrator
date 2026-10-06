@@ -6,7 +6,7 @@ Control Plane para coordinar personas y agentes sobre un proyecto compartido. Po
 
 ## Estado
 
-El MVP local cubre el escenario de tres Bridges, claim atómico, dependencias y subtareas, intents con detección de solapamiento, propuestas con aprobación humana, mensajería y recuperación tras cortes SSE. Hay un panel mínimo de aprobación en `/`. El despliegue AWS está activo en `us-east-1` mediante dos stacks CloudFormation y CodeBuild, con URL pública `https://d3tlsuzwwbes8y.cloudfront.net`. La integración con Claude real sigue fuera del alcance de esta primera versión: los Bridges son simulados.
+El MVP local cubre el escenario de tres Bridges, claim atómico, dependencias y subtareas, intents con detección de solapamiento, propuestas con aprobación humana, mensajería y recuperación tras cortes SSE. El panel permite crear organizaciones, proyectos, tareas, contexto y mensajes; también muestra la red de workspaces y el flujo de servicios. El despliegue AWS está activo en `us-east-1` mediante dos stacks CloudFormation y CodeBuild, con URL pública `https://d3tlsuzwwbes8y.cloudfront.net`. La integración con Claude real sigue fuera del alcance de esta primera versión: los Bridges son simulados.
 
 ## Requisitos locales
 

@@ -1,146 +1,57 @@
-const ui = Object.fromEntries(['login', 'logout', 'load', 'projectId', 'devIdentity', 'devUser',
-  'status', 'proposals', 'tasks', 'agents', 'intents', 'activity'].map(id => [id, document.getElementById(id)]));
-let config;
-let accessToken;
-let refreshToken;
-let expiresAt = 0;
-
-function status(message, error = false) {
-  ui.status.textContent = message;
-  ui.status.className = error ? 'error' : '';
+const $ = id => document.getElementById(id);
+const state = {config:null,accessToken:null,refreshToken:null,expiresAt:0,me:null,organizations:[],projects:[],organizationId:null,projectId:null,project:null,workspaces:[],orchestrators:[],agents:[],tasks:[],intents:[],context:[],members:[],flow:[],activity:[],inbox:[],tab:'overview',request:0};
+const titles = {overview:'Resumen',tasks:'Tareas',communications:'Comunicación',context:'Contexto',people:'Equipo y agentes',architecture:'Arquitectura'};
+const labels = {READY:'Lista',CLAIMED:'Reclamada',IN_PROGRESS:'En curso',COMPLETED:'Completada',BLOCKED:'Bloqueada',BACKLOG:'Pendiente',PENDING_APPROVAL:'Por aprobar',ACTIVE:'Activo',ONLINE:'Online',OFFLINE:'Offline',PROPOSAL:'Propuesta',FACT:'Hecho',DISCOVERY:'Descubrimiento',ASSUMPTION:'Suposición',DECISION:'Decisión',COORDINATION_REQUEST:'Coordinación',HELP_REQUEST:'Pedido de ayuda',REVIEW_REQUEST:'Revisión',ARTIFACT_READY:'Artefacto listo',TASK_HANDOFF:'Transferencia',MESSAGE_CREATED:'Mensaje enviado',TASK_CREATED:'Tarea creada',TASK_CLAIMED:'Tarea reclamada',TASK_IN_PROGRESS:'Tarea iniciada',TASK_COMPLETED:'Tarea completada',PROPOSAL_CREATED:'Propuesta creada',PROPOSAL_APPROVED:'Propuesta aprobada',WORKSPACE_CONNECTED:'Workspace conectado',AGENT_REGISTERED:'Agente registrado',RESOURCE_CONFLICT_DETECTED:'Conflicto de recurso'};
+const eventDetails = {PROPOSAL_CREATED:'Una propuesta espera decisión.',PROPOSAL_APPROVED:'La propuesta fue aprobada.',PROPOSAL_REJECTED:'La propuesta fue rechazada.',TASK_CREATED:'Nueva tarea disponible.',TASK_CLAIMED:'Un agente reclamó la tarea.',TASK_IN_PROGRESS:'El trabajo comenzó.',TASK_COMPLETED:'La tarea terminó.',MESSAGE_CREATED:'Nuevo intercambio entre workspaces.',WORKSPACE_CONNECTED:'Un workspace se conectó.',WORKSPACE_STATUS_CHANGED:'El workspace cambió de estado.',ORCHESTRATOR_STATUS_CHANGED:'El orquestador cambió de estado.',AGENT_STATUS_CHANGED:'El agente cambió de estado.',AGENT_REGISTERED:'Un agente se incorporó.',RESOURCE_CONFLICT_DETECTED:'Dos agentes anunciaron recursos superpuestos.'};
+const label = value => labels[value] || String(value || '').replaceAll('_',' ').toLowerCase();
+function node(tag,className,text){const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined&&text!==null)el.textContent=String(text);return el;}
+function append(parent,...children){for(const child of children)if(child)parent.append(child);return parent;}
+function empty(parent,message){parent.replaceChildren(node('div','empty',message));}
+function chip(value){return node('span',`chip ${value}`,label(value));}
+function time(value){if(!value)return '';const date=new Date(value);return Number.isNaN(date.getTime())?'':new Intl.DateTimeFormat('es-AR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}).format(date);}
+let toastTimer;
+function toast(message,error=false){const el=$('toast');el.textContent=message;el.className=`toast${error?' error':''}`;el.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.hidden=true,5500);}
+function safe(fn){return (...args)=>{try{return Promise.resolve(fn(...args)).catch(error=>toast(error.message||String(error),true));}catch(error){toast(error.message||String(error),true);}};}
+function randomBase64Url(length=32){const bytes=crypto.getRandomValues(new Uint8Array(length));return btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+async function sha256Base64Url(value){const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+async function login(){const c=state.config;if(!c.cognitoDomain||!c.humanClientId||!c.baseUrl)throw Error('Cognito todavía no está configurado.');const verifier=randomBase64Url(64),nonce=randomBase64Url();sessionStorage.setItem('pkce-verifier',verifier);sessionStorage.setItem('oauth-state',nonce);const params=new URLSearchParams({response_type:'code',client_id:c.humanClientId,redirect_uri:`${location.origin}/`,scope:`openid profile ${c.scope}`,state:nonce,code_challenge_method:'S256',code_challenge:await sha256Base64Url(verifier),resource:c.baseUrl});location.assign(`${c.cognitoDomain}/oauth2/authorize?${params}`);}
+async function exchange(params){const response=await fetch(`${state.config.cognitoDomain}/oauth2/token`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:params});const data=await response.json();if(!response.ok||!data.access_token)throw Error(data.error_description||'No se pudo obtener el token');state.accessToken=data.access_token;if(data.refresh_token)state.refreshToken=data.refresh_token;state.expiresAt=Date.now()+(data.expires_in||300)*1000;}
+async function completeLogin(){const params=new URLSearchParams(location.search);if(params.has('error'))throw Error(params.get('error_description')||params.get('error'));if(!params.has('code'))return;const nonce=sessionStorage.getItem('oauth-state'),verifier=sessionStorage.getItem('pkce-verifier');if(!nonce||nonce!==params.get('state')||!verifier)throw Error('Estado OAuth inválido');if(params.has('iss')&&params.get('iss')!==state.config.issuer)throw Error('Emisor OAuth inválido');await exchange(new URLSearchParams({grant_type:'authorization_code',client_id:state.config.humanClientId,code:params.get('code'),redirect_uri:`${location.origin}/`,code_verifier:verifier}));sessionStorage.removeItem('pkce-verifier');sessionStorage.removeItem('oauth-state');history.replaceState({},'',location.pathname);}
+async function validToken(){if(state.config.dev)return '';if(!state.accessToken)throw Error('Ingresá para continuar.');if(Date.now()<state.expiresAt-60000)return state.accessToken;if(!state.refreshToken)throw Error('La sesión venció. Ingresá nuevamente.');await exchange(new URLSearchParams({grant_type:'refresh_token',client_id:state.config.humanClientId,refresh_token:state.refreshToken}));return state.accessToken;}
+async function api(path,options={}){const headers={...(options.headers||{})};if(state.config.dev)headers['X-Dev-User']='local-user';else headers.Authorization=`Bearer ${await validToken()}`;const response=await fetch(`/api/v1${path}`,{...options,headers});const raw=await response.text();let body;try{body=raw?JSON.parse(raw):null;}catch{body=null;}if(!response.ok)throw Error(body?.error||body?.message||`Error HTTP ${response.status}`);return body;}
+function post(path,data){return api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});}
+function setAuthenticated(yes){$('guest').hidden=yes;$('authenticated').hidden=!yes;$('login').hidden=yes||state.config.dev;$('logout').hidden=!yes||state.config.dev;$('refresh').hidden=!yes;}
+function selectOptions(select,items,placeholder,selected){select.replaceChildren();if(placeholder){const option=node('option','',placeholder);option.value='';select.append(option);}for(const item of items){const option=node('option','',item.name);option.value=item.id;select.append(option);}select.value=selected||'';if(!select.value&&items.length&&!placeholder)select.value=items[0].id;}
+function showTab(tab){state.tab=tab;document.querySelectorAll('[data-tab]').forEach(el=>el.classList.toggle('active',el.dataset.tab===tab));document.querySelectorAll('[data-panel]').forEach(el=>el.hidden=el.dataset.panel!==tab);$('pageTitle').textContent=titles[tab]||'Resumen';$('breadcrumb').textContent=`CONTROL PLANE / ${titles[tab].toUpperCase()}`;localStorage.setItem('agent-orchestrator-tab',tab);}
+async function loadOrganizations(preferredOrg,preferredProject){const [me,organizations]=await Promise.all([api('/me'),api('/organizations')]);state.me=me;state.organizations=organizations;const storedOrg=localStorage.getItem('agent-orchestrator-organization');state.organizationId=organizations.some(o=>o.id===(preferredOrg||storedOrg))?(preferredOrg||storedOrg):(organizations[0]?.id||null);selectOptions($('organizationSelect'),organizations,'Sin organizaciones',state.organizationId);$('mySub').textContent=me.sub;await loadProjects(preferredProject);}
+async function loadProjects(preferredProject){state.projects=state.organizationId?await api(`/organizations/${state.organizationId}/projects`):[];const stored=localStorage.getItem('agent-orchestrator-project');state.projectId=state.projects.some(p=>p.id===(preferredProject||stored))?(preferredProject||stored):(state.projects[0]?.id||null);selectOptions($('projectSelect'),state.projects,'Sin proyectos',state.projectId);selectOptions($('projectOrganization'),state.organizations.filter(o=>o.owner_sub===state.me.sub),'Elegí organización',state.organizationId);$('newProject').disabled=!state.organizations.some(o=>o.owner_sub===state.me.sub);$('onboarding').hidden=!!state.projectId;$('projectContent').hidden=!state.projectId;localStorage.setItem('agent-orchestrator-organization',state.organizationId||'');if(state.projectId){localStorage.setItem('agent-orchestrator-project',state.projectId);await loadProject();}else{$('pageTitle').textContent='Tu centro de coordinación';$('breadcrumb').textContent='CONTROL PLANE / PRIMEROS PASOS';$('lastUpdated').textContent='';}}
+async function loadProject(quiet=false){if(!state.projectId)return;const projectId=state.projectId,request=++state.request;const root=`/projects/${projectId}`;const [project,workspaces,orchestrators,agents,tasks,intents,context,members,flow,activity]=await Promise.all([api(root),api(`${root}/workspaces`),api(`${root}/orchestrators`),api(`${root}/agents`),api(`${root}/tasks`),api(`${root}/resource-intents`),api(`${root}/context`),api(`${root}/members`),api(`${root}/message-flow`),api(`${root}/activity?limit=100`)]);if(request!==state.request||projectId!==state.projectId)return;const own=workspaces.filter(w=>w.owner_id===state.me.sub);const inboxByWorkspace=await Promise.all(own.map(w=>api(`/workspaces/${w.id}/messages`)));if(request!==state.request)return;Object.assign(state,{project,workspaces,orchestrators,agents,tasks,intents,context,members,flow,activity,inbox:inboxByWorkspace.flat().sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))});render();$('lastUpdated').textContent=`Actualizado ${new Intl.DateTimeFormat('es-AR',{hour:'2-digit',minute:'2-digit'}).format(new Date())}`;if(!quiet)toast('Proyecto actualizado.');}
+function render(){const org=state.organizations.find(o=>o.id===state.organizationId);$('projectName').textContent=state.project.name;$('projectSlug').textContent=`${org?.name||'ORGANIZACIÓN'} / ${state.project.slug}`;$('metricTasks').textContent=state.tasks.filter(t=>['CLAIMED','IN_PROGRESS'].includes(t.status)).length;$('metricAgents').textContent=state.agents.filter(a=>a.status!=='OFFLINE').length;$('metricMessages').textContent=state.flow.length;$('metricProposals').textContent=state.context.filter(c=>c.status==='PENDING_APPROVAL').length;$('memberCount').textContent=state.members.length;$('workspaceCount').textContent=state.workspaces.length;$('inboxCount').textContent=state.inbox.length;renderNetwork();renderOverview();renderTasks();renderCommunications();renderContext();renderPeople();renderIntents();prepareForms();showTab(state.tab);}
+function workspaceName(id){return id?(state.workspaces.find(w=>w.id===id)?.name||'Workspace'):'Sistema';}
+function eventDescription(event){return eventDetails[event.type]||event.summary;}
+function agentName(id){return state.agents.find(a=>a.id===id)?.name||'';}
+function renderNetwork(){const target=$('network');target.replaceChildren();const workspaces=state.workspaces.slice(0,8);if(!workspaces.length){empty(target,'Todavía no hay workspaces. Conectá un Bridge o un espacio web para ver la red.');return;}const positions=new Map();workspaces.forEach((w,i)=>{const angle=2*Math.PI*i/workspaces.length-Math.PI/2,r=workspaces.length===1?0:Math.min(34,24+workspaces.length*2);positions.set(w.id,{x:50+Math.cos(angle)*r,y:50+Math.sin(angle)*r});});const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 100 100');svg.setAttribute('preserveAspectRatio','none');const pairs=new Map();for(const message of state.flow){if(!positions.has(message.from_workspace_id)||!positions.has(message.to_workspace_id))continue;const key=[message.from_workspace_id,message.to_workspace_id].sort().join(':');pairs.set(key,(pairs.get(key)||0)+1);}for(const [key,count] of pairs){const [from,to]=key.split(':'),a=positions.get(from),b=positions.get(to);if(!a||!b||from===to)continue;const line=document.createElementNS('http://www.w3.org/2000/svg','line');for(const [attribute,value] of Object.entries({x1:a.x,y1:a.y,x2:b.x,y2:b.y,stroke:'#6fc7e7','stroke-width':Math.min(1.3,.35+count*.12),opacity:'.8','stroke-linecap':'round'}))line.setAttribute(attribute,value);svg.append(line);}target.append(svg);for(const w of workspaces){const p=positions.get(w.id),el=node('div',`network-node${w.owner_id===state.me.sub?' mine':''}`);el.style.left=`${p.x}%`;el.style.top=`${p.y}%`;const heading=node('strong','',w.name),detail=node('small','',`${state.agents.filter(a=>state.orchestrators.some(o=>o.id===a.orchestrator_id&&o.workspace_id===w.id)).length} agentes`),indicator=node('span',`node-indicator ${w.status==='ONLINE'?'online':''}`);heading.prepend(indicator);append(el,heading,detail);target.append(el);}if(state.workspaces.length>8)target.append(node('div','network-overflow',`+${state.workspaces.length-8} workspaces`));}
+function listItem(title,detail,meta,badge){const row=node('div','stack-item'),head=node('div','item-head');append(head,node('strong','',title),badge?chip(badge):null);append(row,head,detail?node('p','',detail):null,meta?node('small','',meta):null);return row;}
+function renderOverview(){const activity=$('overviewActivity');activity.replaceChildren();for(const event of [...state.activity].slice(-5).reverse())activity.append(listItem(label(event.type),eventDescription(event),time(event.created_at)));if(!activity.childElementCount)empty(activity,'Todavía no hay actividad.');const traffic=$('networkTraffic');traffic.replaceChildren();for(const message of state.flow.slice(0,3))traffic.append(listItem(`${workspaceName(message.from_workspace_id)} → ${workspaceName(message.to_workspace_id)}`,label(message.type),time(message.created_at)));if(!state.flow.length)empty(traffic,'Los mensajes entre workspaces aparecerán aquí.');const tasks=$('overviewTasks');tasks.replaceChildren();for(const task of state.tasks.filter(t=>t.status!=='COMPLETED').slice(0,5))tasks.append(listItem(task.title,task.description,`Creada ${time(task.created_at)}`,task.status));if(!tasks.childElementCount)empty(tasks,'Sin tareas activas.');const proposals=$('overviewProposals');proposals.replaceChildren();for(const item of state.context.filter(c=>c.status==='PENDING_APPROVAL').slice(0,4))proposals.append(proposalRow(item));if(!proposals.childElementCount)empty(proposals,'No hay propuestas pendientes.');}
+function proposalRow(item){const row=listItem(item.title,item.content,time(item.created_at),'PENDING_APPROVAL'),actions=node('div','button-row');const approve=node('button','button primary','Aprobar'),reject=node('button','button ghost','Rechazar');approve.addEventListener('click',safe(()=>decide(item.id,'approve')));reject.addEventListener('click',safe(()=>decide(item.id,'reject')));append(actions,approve,reject);row.append(actions);return row;}
+async function decide(id,action){if(!confirm(`${action==='approve'?'Aprobar':'Rechazar'} esta propuesta?`))return;await post(`/context/${id}/${action}`,{});await loadProject(true);toast(action==='approve'?'Propuesta aprobada.':'Propuesta rechazada.');}
+function renderTasks(){const board=$('taskBoard');board.replaceChildren();const columns=[['READY','Por hacer',t=>['READY','BACKLOG'].includes(t.status)],['IN_PROGRESS','En marcha',t=>['CLAIMED','IN_PROGRESS','BLOCKED'].includes(t.status)],['COMPLETED','Completadas',t=>t.status==='COMPLETED']];for(const [key,title,filter] of columns){const column=node('div','task-column'),items=state.tasks.filter(filter);append(column,append(node('div','column-title'),node('span','',title),node('span','',items.length)));for(const task of items){const card=node('div','task-card');append(card,node('strong','',task.title),task.description?node('p','',task.description):null,chip(task.status),node('small','',`${task.parent_task_id?'Subtarea · ':''}${task.executor_agent_id?agentName(task.executor_agent_id)+' · ':''}${time(task.created_at)}`));column.append(card);}if(!items.length)column.append(node('div','empty','Nada por aquí todavía.'));board.append(column);}}
+function renderCommunications(){const flow=$('messageFlow');flow.replaceChildren();for(const message of state.flow){const from=workspaceName(message.from_workspace_id),to=workspaceName(message.to_workspace_id);flow.append(listItem(`${from} → ${to}`,label(message.type),`${time(message.created_at)} · ${label(message.status)}`));}if(!state.flow.length)empty(flow,'No hay mensajes todavía. Enviá uno para empezar la conversación.');const inbox=$('inbox');inbox.replaceChildren();for(const message of state.inbox.slice(0,30)){const row=listItem(message.subject||label(message.type),message.body,`${workspaceName(message.from_workspace_id)} · ${time(message.created_at)}`,message.status);if(message.type==='TASK_HANDOFF'&&!message.accepted_task_id){const button=node('button','button secondary','Aceptar subtarea');button.addEventListener('click',safe(async()=>{await post(`/messages/${message.id}/accept-handoff`,{});await loadProject(true);toast('Subtarea creada.');}));row.append(button);}inbox.append(row);}if(!state.inbox.length)empty(inbox,'No recibiste mensajes en tus workspaces.');const events=$('activityFeed');events.replaceChildren();for(const event of [...state.activity].slice(-30).reverse())events.append(listItem(label(event.type),eventDescription(event),`${workspaceName(event.workspace_id)} · ${time(event.created_at)}`));if(!state.activity.length)empty(events,'Sin eventos todavía.');$('createWebWorkspace').hidden=state.workspaces.some(w=>w.owner_id===state.me.sub&&w.name==='web-console');}
+function renderContext(){const target=$('contextList');target.replaceChildren();for(const item of state.context){const card=node('article','context-card');append(card,chip(item.status==='PENDING_APPROVAL'?'PENDING_APPROVAL':item.type),node('h4','',item.title),node('p','',item.content),node('small','subtle',`${time(item.created_at)} · ${label(item.status)}`));if(item.status==='PENDING_APPROVAL'){const actions=node('div','actions'),approve=node('button','button primary','Aprobar'),reject=node('button','button ghost','Rechazar');approve.addEventListener('click',safe(()=>decide(item.id,'approve')));reject.addEventListener('click',safe(()=>decide(item.id,'reject')));append(actions,approve,reject);card.append(actions);}target.append(card);}if(!state.context.length)empty(target,'Agregá el primer hecho, descubrimiento o propuesta.');}
+function renderPeople(){const target=$('memberList');target.replaceChildren();for(const member of state.members)target.append(listItem(member.display_name,member.user_sub,member.role==='ADMIN'?'Administrador':'Miembro'));if(!state.members.length)empty(target,'Sin miembros.');const workspaces=$('workspaceList');workspaces.replaceChildren();for(const w of state.workspaces){const card=node('article','workspace-card'),head=node('div','item-head');append(head,node('h4','',w.name),chip(w.status));append(card,head,node('p','',`${w.owner_display_name} · ${w.hostname}`));const list=node('div','agent-list'),orchestratorIds=state.orchestrators.filter(o=>o.workspace_id===w.id).map(o=>o.id),agents=state.agents.filter(a=>orchestratorIds.includes(a.orchestrator_id));for(const agent of agents)append(list,append(node('div','agent-row'),node('span','',`${agent.name} · ${agent.role||'Agente'}`),node('span','',label(agent.status))));if(!agents.length)list.append(node('div','empty','Sin agentes registrados.'));card.append(list);workspaces.append(card);}if(!state.workspaces.length)empty(workspaces,'Todavía no hay workspaces conectados.');}
+function renderIntents(){const target=$('intentList');target.replaceChildren();for(const intent of state.intents.filter(i=>i.status==='ACTIVE'&&new Date(i.lease_until)>new Date()))target.append(listItem(intent.resource_path,`${intent.intent_type} · ${intent.resource_type} · ${workspaceName(intent.workspace_id)}`,`Vence ${time(intent.lease_until)}`));if(!target.childElementCount)empty(target,'No hay intents activos.');}
+function prepareForms(){const parent=$('parentTaskSelect');parent.replaceChildren();const none=node('option','','Ninguna');none.value='';parent.append(none);for(const task of state.tasks){const option=node('option','',task.title);option.value=task.id;parent.append(option);}const own=state.workspaces.filter(w=>w.owner_id===state.me.sub);selectOptions($('fromWorkspaceSelect'),own,'Elegí un workspace propio',own[0]?.id);selectOptions($('toWorkspaceSelect'),state.workspaces,'Elegí destinatario','');}
+function openDialog(id){if(id==='projectDialog'&&!state.organizations.some(o=>o.owner_sub===state.me.sub)){toast('Primero creá una organización propia.',true);return;}if(id==='messageDialog'&&!state.workspaces.some(w=>w.owner_id===state.me.sub)){showTab('communications');toast('Conectá un espacio web o un Bridge para poder enviar mensajes.',true);return;}$(id).showModal();}
+function bindForm(formId,handler){const form=$(formId);form.addEventListener('submit',safe(async event=>{event.preventDefault();const submit=form.querySelector('button[type=submit],button:not([type])');submit.disabled=true;try{await handler(new FormData(form));form.closest('dialog').close();form.reset();}finally{submit.disabled=false;}}));}
+function slugify(value){return value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,60);}
+function bind(){for(const button of document.querySelectorAll('[data-tab]'))button.addEventListener('click',()=>showTab(button.dataset.tab));for(const button of document.querySelectorAll('[data-tab-target]'))button.addEventListener('click',()=>showTab(button.dataset.tabTarget));for(const button of document.querySelectorAll('[data-open]'))button.addEventListener('click',()=>openDialog(button.dataset.open));for(const button of document.querySelectorAll('[data-close]'))button.addEventListener('click',()=>button.closest('dialog').close());for(const id of ['organizationForm','projectForm']){const form=$(id),name=form.elements.name,slug=form.elements.slug;name.addEventListener('input',()=>{if(!slug.dataset.edited)slug.value=slugify(name.value);});slug.addEventListener('input',()=>slug.dataset.edited='true');form.addEventListener('reset',()=>delete slug.dataset.edited);}
+  $('login').addEventListener('click',safe(login));$('guestLogin').addEventListener('click',safe(login));$('logout').addEventListener('click',()=>{state.accessToken=state.refreshToken=null;state.me=null;setAuthenticated(false);toast('Sesión cerrada.');});$('refresh').addEventListener('click',safe(()=>loadProject()));$('newOrganization').addEventListener('click',()=>openDialog('organizationDialog'));$('newProject').addEventListener('click',()=>openDialog('projectDialog'));$('organizationSelect').addEventListener('change',safe(async event=>{state.organizationId=event.target.value||null;await loadProjects();}));$('projectSelect').addEventListener('change',safe(async event=>{state.projectId=event.target.value||null;localStorage.setItem('agent-orchestrator-project',state.projectId||'');await loadProject();}));$('copySub').addEventListener('click',safe(async()=>{await navigator.clipboard.writeText(state.me.sub);toast('ID copiado.');}));$('createWebWorkspace').addEventListener('click',safe(async()=>{await post(`/projects/${state.projectId}/workspaces`,{name:'web-console',hostname:'browser',os:'Web',ownerDisplayName:state.members.find(m=>m.user_sub===state.me.sub)?.display_name||'Usuario web'});await loadProject(true);toast('Espacio web conectado. Ya podés enviar mensajes.');}));
+  bindForm('organizationForm',async data=>{const org=await post('/organizations',{name:data.get('name').trim(),slug:data.get('slug').trim()});await loadOrganizations(org.id);toast('Organización creada. Ahora creá un proyecto.');});
+  bindForm('projectForm',async data=>{const project=await post(`/organizations/${data.get('organizationId')}/projects`,{name:data.get('name').trim(),slug:data.get('slug').trim()});await loadOrganizations(data.get('organizationId'),project.id);toast('Proyecto creado.');});
+  bindForm('taskForm',async data=>{const body={title:data.get('title').trim(),description:data.get('description').trim()};if(data.get('parentTaskId'))body.parentTaskId=data.get('parentTaskId');await post(`/projects/${state.projectId}/tasks`,body);await loadProject(true);toast('Tarea creada.');});
+  bindForm('memberForm',async data=>{await post(`/projects/${state.projectId}/members`,{userSub:data.get('userSub').trim(),displayName:data.get('displayName').trim()});await loadProject(true);toast('Miembro agregado.');});
+  bindForm('messageForm',async data=>{await post(`/projects/${state.projectId}/messages`,{fromWorkspaceId:data.get('fromWorkspaceId'),toWorkspaceId:data.get('toWorkspaceId'),type:data.get('type'),subject:data.get('subject').trim(),body:data.get('body').trim()});await loadProject(true);toast('Mensaje enviado.');});
+  bindForm('contextForm',async data=>{await post(`/projects/${state.projectId}/context`,{type:data.get('type'),title:data.get('title').trim(),content:data.get('content').trim()});await loadProject(true);toast(data.get('type')==='PROPOSAL'?'Propuesta pendiente de aprobación.':'Contexto publicado.');});
 }
-function randomBase64Url(length = 32) {
-  const bytes = crypto.getRandomValues(new Uint8Array(length));
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-async function sha256Base64Url(value) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-function redirectUri() { return `${location.origin}/`; }
-async function login() {
-  if (!config.cognitoDomain || !config.humanClientId || !config.baseUrl) {
-    status('Cognito todavía no está configurado.', true); return;
-  }
-  const verifier = randomBase64Url(64);
-  const state = randomBase64Url();
-  sessionStorage.setItem('pkce-verifier', verifier);
-  sessionStorage.setItem('oauth-state', state);
-  const params = new URLSearchParams({ response_type: 'code', client_id: config.humanClientId,
-    redirect_uri: redirectUri(), scope: `openid profile ${config.scope}`, state,
-    code_challenge_method: 'S256', code_challenge: await sha256Base64Url(verifier),
-    resource: config.baseUrl });
-  location.assign(`${config.cognitoDomain}/oauth2/authorize?${params}`);
-}
-async function exchange(params) {
-  const response = await fetch(`${config.cognitoDomain}/oauth2/token`, {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params });
-  const data = await response.json();
-  if (!response.ok || !data.access_token) throw new Error(data.error_description || 'No se pudo obtener el token');
-  accessToken = data.access_token;
-  if (data.refresh_token) refreshToken = data.refresh_token;
-  expiresAt = Date.now() + (data.expires_in || 300) * 1000;
-  ui.login.hidden = true; ui.logout.hidden = false;
-}
-async function completeLogin() {
-  const params = new URLSearchParams(location.search);
-  if (params.has('error')) throw new Error(params.get('error_description') || params.get('error'));
-  if (!params.has('code')) return;
-  const expected = sessionStorage.getItem('oauth-state');
-  const verifier = sessionStorage.getItem('pkce-verifier');
-  if (!expected || params.get('state') !== expected || !verifier) throw new Error('Estado OAuth inválido');
-  if (params.has('iss') && params.get('iss') !== config.issuer) throw new Error('Emisor OAuth inválido');
-  await exchange(new URLSearchParams({ grant_type: 'authorization_code', client_id: config.humanClientId,
-    code: params.get('code'), redirect_uri: redirectUri(), code_verifier: verifier }));
-  sessionStorage.removeItem('oauth-state'); sessionStorage.removeItem('pkce-verifier');
-  history.replaceState({}, '', '/');
-  status('Sesión iniciada.');
-}
-async function validToken() {
-  if (config.dev) return '';
-  if (!accessToken) throw new Error('Ingresá antes de consultar el proyecto.');
-  if (Date.now() < expiresAt - 60000) return accessToken;
-  if (!refreshToken) throw new Error('La sesión venció. Ingresá nuevamente.');
-  await exchange(new URLSearchParams({ grant_type: 'refresh_token', client_id: config.humanClientId,
-    refresh_token: refreshToken }));
-  return accessToken;
-}
-async function api(path, options = {}) {
-  const token = await validToken();
-  const headers = { ...(options.headers || {}) };
-  if (config.dev) headers['X-Dev-User'] = ui.devUser.value.trim() || 'local-user';
-  else headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(`/api/v1${path}`, { ...options, headers });
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
-  return body;
-}
-function text(parent, tag, value, className) {
-  const node = document.createElement(tag);
-  node.textContent = value ?? '';
-  if (className) node.className = className;
-  parent.append(node);
-  return node;
-}
-function empty(container, message) { container.replaceChildren(); text(container, 'p', message); }
-function renderRows(container, rows, render) {
-  container.replaceChildren();
-  if (!rows.length) { text(container, 'p', 'Sin registros.'); return; }
-  rows.forEach(row => { const article = document.createElement('article'); render(article, row); container.append(article); });
-}
-async function decide(id, action) {
-  if (!confirm(`${action === 'approve' ? 'Aprobar' : 'Rechazar'} esta propuesta?`)) return;
-  await api(`/context/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
-  await load();
-}
-async function load() {
-  const project = ui.projectId.value.trim();
-  if (!/^[0-9a-fA-F-]{36}$/.test(project)) { status('Ingresá un Project ID válido.', true); return; }
-  localStorage.setItem('agent-orchestrator-project', project);
-  status('Cargando estado del proyecto…');
-  try {
-    const root = `/projects/${encodeURIComponent(project)}`;
-    const [context, tasks, agents, intents, activity] = await Promise.all([
-      api(`${root}/context`), api(`${root}/tasks`), api(`${root}/agents`),
-      api(`${root}/resource-intents`), api(`${root}/activity?limit=100`)]);
-    renderRows(ui.proposals, context.filter(x => x.status === 'PENDING_APPROVAL'), (article, row) => {
-      text(article, 'strong', row.title); text(article, 'p', row.content);
-      text(article, 'small', row.id, 'badge');
-      const actions = document.createElement('div'); actions.className = 'actions';
-      for (const [label, action, css] of [['Aprobar', 'approve', ''], ['Rechazar', 'reject', 'danger']]) {
-        const button = text(actions, 'button', label, css);
-        button.addEventListener('click', () => decide(row.id, action).catch(e => status(e.message, true)));
-      }
-      article.append(actions);
-    });
-    renderRows(ui.tasks, tasks, (article, row) => {
-      text(article, 'strong', row.title); text(article, 'p', row.description);
-      text(article, 'small', `${row.status} · ${row.id}`, 'badge');
-    });
-    renderRows(ui.agents, agents, (article, row) => {
-      text(article, 'strong', row.name); text(article, 'p', `${row.role || 'Agente'} · ${row.status}`);
-      text(article, 'small', row.current_task_id || 'Sin tarea', 'badge');
-    });
-    renderRows(ui.intents, intents.filter(x => x.status === 'ACTIVE'), (article, row) => {
-      text(article, 'strong', row.resource_path); text(article, 'p', `${row.intent_type} · ${row.resource_type}`);
-      text(article, 'small', `Vence ${row.lease_until}`, 'badge');
-    });
-    renderRows(ui.activity, activity.slice(-25).reverse(), (article, row) => {
-      text(article, 'strong', row.type); text(article, 'p', row.summary);
-      text(article, 'small', row.created_at, 'badge');
-    });
-    status('Estado actualizado.');
-  } catch (error) { status(error.message, true); }
-}
-ui.login.addEventListener('click', () => login().catch(e => status(e.message, true)));
-ui.logout.addEventListener('click', () => { accessToken = refreshToken = undefined; expiresAt = 0;
-  ui.login.hidden = false; ui.logout.hidden = true; status('Sesión cerrada.'); });
-ui.load.addEventListener('click', load);
-(async () => {
-  config = await (await fetch('/public/config')).json();
-  ui.devIdentity.hidden = !config.dev;
-  ui.login.hidden = config.dev;
-  ui.projectId.value = localStorage.getItem('agent-orchestrator-project') || '';
-  await completeLogin();
-  if (ui.projectId.value) await load();
-})().catch(e => status(e.message, true));
+async function init(){bind();state.config=await (await fetch('/public/config')).json();if(state.config.dev){setAuthenticated(true);}else{await completeLogin();setAuthenticated(!!state.accessToken);}if(state.config.dev||state.accessToken){state.tab=localStorage.getItem('agent-orchestrator-tab')||'overview';await loadOrganizations();}setInterval(()=>{if(!state.projectId||document.hidden||(!state.config.dev&&!state.accessToken))return;const web=state.workspaces.find(w=>w.owner_id===state.me?.sub&&w.name==='web-console');if(web)post(`/workspaces/${web.id}/heartbeat`,{}).catch(()=>{});loadProject(true).catch(error=>toast(error.message,true));},15000);}
+init().catch(error=>toast(error.message,true));

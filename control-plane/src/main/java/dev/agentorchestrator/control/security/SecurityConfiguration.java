@@ -21,7 +21,7 @@ public class SecurityConfiguration {
             @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuer) throws Exception {
         return http.csrf(csrf -> csrf.disable()).cors(Customizer.withDefaults())
                 .authorizeHttpRequests(auth -> auth.requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
-                        .requestMatchers("/", "/index.html", "/app.js", "/public/config",
+                        .requestMatchers("/", "/index.html", "/app.js", "/styles.css", "/public/config",
                                 "/.well-known/oauth-protected-resource").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex.authenticationEntryPoint((request, response, error) -> {

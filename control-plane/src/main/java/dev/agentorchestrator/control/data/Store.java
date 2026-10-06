@@ -21,6 +21,8 @@ public class Store {
         this.db = db; this.actor = actor; this.organizations = organizations; this.projects = projects;
     }
 
+    public String currentUser() { return actor.sub(); }
+
     public String one(String sql, Object... args) {
         try { return db.queryForObject(sql, String.class, args); }
         catch (EmptyResultDataAccessException e) { throw ApiProblem.notFound("Resource not found"); }
@@ -209,6 +211,29 @@ public class Store {
         Integer visible = db.queryForObject("select count(*) from organization o where o.id=? and (o.owner_sub=? or exists(select 1 from project p join project_member pm on pm.project_id=p.id where p.organization_id=o.id and pm.user_sub=?))", Integer.class, id, actor.sub(), actor.sub());
         if (visible == null || visible == 0) throw ApiProblem.forbidden("Not an organization member");
         return one("select row_to_json(x)::text from (select * from organization where id=?) x", id);
+    }
+    public String organizations() {
+        String user = actor.sub();
+        return many("select row_to_json(x)::text from (select o.* from organization o where o.owner_sub=? " +
+                "or exists(select 1 from project p join project_member pm on pm.project_id=p.id " +
+                "where p.organization_id=o.id and pm.user_sub=?) order by o.created_at desc) x", user, user);
+    }
+    public String organizationProjects(UUID organizationId) {
+        organization(organizationId);
+        String user = actor.sub();
+        return many("select row_to_json(x)::text from (select p.* from project p join project_member pm " +
+                "on pm.project_id=p.id where p.organization_id=? and pm.user_sub=? " +
+                "order by p.created_at desc) x", organizationId, user);
+    }
+    public String members(UUID projectId) {
+        member(projectId);
+        return many("select row_to_json(x)::text from (select user_sub,display_name,role,created_at " +
+                "from project_member where project_id=? order by created_at) x", projectId);
+    }
+    public String orchestrators(UUID projectId) {
+        member(projectId);
+        return many("select row_to_json(x)::text from (select o.* from orchestrator o join workspace w " +
+                "on w.id=o.workspace_id where w.project_id=? order by o.created_at) x", projectId);
     }
     public String project(UUID id) { member(id); return one("select row_to_json(x)::text from (select * from project where id=?) x", id); }
     public String workspace(UUID id) { member(workspaceProject(id)); return one("select row_to_json(x)::text from (select * from workspace where id=?) x", id); }

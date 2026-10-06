@@ -66,6 +66,9 @@ public class CoordinationApi {
         return service.message(service.sendMessage(projectId, input.fromWorkspaceId(), input.fromAgentId(), input.toWorkspaceId(), input.toAgentId(), input.taskId(), input.type(), input.subject(), input.body()));
     }
 
+    @GetMapping(value="/projects/{projectId}/message-flow", produces=MediaType.APPLICATION_JSON_VALUE)
+    public String messageFlow(@PathVariable UUID projectId) { return service.messageFlow(projectId); }
+
     @GetMapping(value="/workspaces/{workspaceId}/messages", produces=MediaType.APPLICATION_JSON_VALUE)
     public String inbox(@PathVariable UUID workspaceId) { return service.inbox(workspaceId); }
 

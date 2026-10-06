@@ -4,7 +4,7 @@ Actualizado: 6 de octubre de 2026. Este manual describe la versión desplegada e
 
 ## 1. Qué hace el sistema
 
-Agent Orchestrator coordina personas y agentes simulados dentro de un **proyecto**. Cada persona entra con su propia cuenta de Cognito y puede tener un **workspace** (su computadora) con un orquestador y varios agentes. El servidor guarda tareas, dependencias, contexto, mensajes, intenciones de uso de archivos y actividad. El Bridge local mantiene la presencia y recibe cambios por SSE; el panel web permite consultar el proyecto y decidir propuestas. También hay una API REST y un endpoint MCP para clientes compatibles.
+Agent Orchestrator coordina personas y agentes simulados dentro de un **proyecto**. Cada persona entra con su propia cuenta de Cognito y puede tener un **workspace** (su computadora) con un orquestador y varios agentes. El servidor guarda tareas, dependencias, contexto, mensajes, intenciones de uso de archivos y actividad. El Bridge local mantiene la presencia y recibe cambios por SSE; el panel web permite crear proyectos, tareas, contexto y mensajes, ver el flujo entre workspaces y decidir propuestas. También hay una API REST y un endpoint MCP para clientes compatibles.
 
 El Bridge registra y coordina agentes simulados; **no ejecuta un modelo ni lee archivos de la computadora**. El contenido de mensajes, contexto y tareas lo envía el usuario o un cliente que use la API/MCP.
 
@@ -15,15 +15,15 @@ El Bridge registra y coordina agentes simulados; **no ejecuta un modelo ni lee a
 - MCP: `https://d3tlsuzwwbes8y.cloudfront.net/mcp`
 - Región AWS: `us-east-1`; stack: `agent-orchestrator-app`.
 
-**Estado inicial:** el pool Cognito `us-east-1_m0WBZIIFO` no tiene usuarios actualmente. Un administrador de la cuenta AWS debe crear el primer usuario en **Amazon Cognito → User pools → us-east-1_m0WBZIIFO → Users → Create user**. Debe darle la contraseña temporal por un canal seguro; Cognito puede pedirle cambiarla al primer ingreso. La creación de usuarios adicionales también es administrativa. Un usuario de Cognito no obtiene acceso a un proyecto ajeno hasta que el administrador del proyecto lo agregue como miembro.
+El pool Cognito `us-east-1_m0WBZIIFO` permite únicamente usuarios creados por un administrador de AWS en **Amazon Cognito → User pools → us-east-1_m0WBZIIFO → Users → Create user**. La contraseña temporal se entrega por un canal seguro y Cognito pide cambiarla al primer ingreso. Un usuario de Cognito no obtiene acceso a un proyecto ajeno hasta que el administrador del proyecto lo agregue como miembro.
 
 El panel usa el botón **Ingresar** y abre el inicio de sesión de Cognito. La autenticación usa Authorization Code + PKCE. Si se recarga la pestaña hay que iniciar sesión otra vez, porque los tokens se guardan solo en memoria.
 
 ## 3. Preparar el primer proyecto
 
-La versión actual no tiene formularios para crear organizaciones, proyectos, miembros o tareas. Esas acciones se hacen por la API REST. Para llamar a la API se necesita un **access token del cliente humano** de Cognito, con el scope `https://d3tlsuzwwbes8y.cloudfront.net/api`. El token del Bridge o del cliente MCP no habilita la creación de organizaciones ni la incorporación de miembros.
+Desde el panel, entrá con Cognito, pulsá **Crear organización**, ingresá nombre e identificador, y después pulsá **Crear proyecto**. El proyecto aparece automáticamente en el selector lateral; quien lo creó queda como administrador. En **Equipo y agentes** podés agregar miembros usando su `sub` de Cognito, que cada persona puede copiar desde esa misma vista. La cuenta del miembro debe existir previamente en Cognito.
 
-Para una prueba manual, iniciá sesión en el panel y, en las herramientas de desarrollador de **tu propio navegador**, buscá en **Network** la respuesta a `oauth2/token`. Copiá el campo `access_token` y usalo temporalmente en la terminal. No copies el `id_token`, no publiques el token y no lo guardes en el repositorio. El access token vence después de 60 minutos. Para un uso habitual, el panel necesitaría formularios de administración; todavía no los incluye.
+La API REST sigue disponible para automatización. Para llamarla se necesita un **access token del cliente humano** de Cognito con scope `https://d3tlsuzwwbes8y.cloudfront.net/api`. El token del Bridge o del cliente MCP no habilita la creación de organizaciones ni la incorporación de miembros. Para una prueba manual, iniciá sesión en el panel y, en las herramientas de desarrollador de **tu propio navegador**, buscá en **Network** la respuesta a `oauth2/token`. Copiá `access_token` y usalo temporalmente en la terminal. No copies `id_token`, no publiques el token y no lo guardes en el repositorio.
 
 Ejemplo en PowerShell, después de obtener ese token:
 
@@ -56,16 +56,17 @@ El `sub` se ve en los atributos del usuario en Cognito. En la API, solo un miemb
 
 ## 4. Usar el panel web
 
-1. Abrí la URL pública e iniciá sesión.
-2. Pegá el UUID del proyecto en **Project ID** y presioná **Actualizar**.
-3. Revisá **Tareas**, **Agentes**, **Intents de recursos** y **Actividad reciente**.
-4. En **Propuestas pendientes**, usá **Aprobar** o **Rechazar**. Aprobar convierte la propuesta en una entrada de contexto tipo `DECISION`.
+1. Abrí la URL pública e iniciá sesión. Elegí organización y proyecto en la barra lateral.
+2. **Resumen** muestra métricas, workspaces conectados por mensajes, tareas, actividad y propuestas pendientes.
+3. **Tareas** permite crear tareas y subtareas. **Comunicación** muestra el tráfico entre workspaces y tu inbox. Para escribir desde el panel, pulsá **Conectar espacio web para enviar** si todavía no tenés un workspace propio.
+4. **Contexto** permite publicar hechos, descubrimientos, suposiciones y propuestas. En una propuesta pendiente, usá **Aprobar** o **Rechazar**. Aprobar crea una entrada `DECISION`.
+5. **Equipo y agentes** muestra miembros, workspaces y agentes, y permite agregar un miembro por su `sub`. **Arquitectura** explica el camino Panel/Bridge/MCP → CloudFront → Control Plane → PostgreSQL y el papel de Cognito/SSE.
 
-El panel recuerda el Project ID en ese navegador, pero no la sesión. Solo muestra proyectos de los que sos miembro. Cualquier miembro humano del proyecto puede aprobar o rechazar propuestas en este MVP.
+El panel recuerda el proyecto seleccionado en ese navegador, pero no la sesión. Solo muestra proyectos de los que sos miembro. Los datos se actualizan cada 15 segundos mientras la pestaña está visible. Cualquier miembro humano del proyecto puede aprobar o rechazar propuestas en este MVP.
 
 ## 5. Crear y ejecutar una tarea
 
-Una tarea nace en estado `READY`. Un agente la reclama (`CLAIMED`), la inicia (`IN_PROGRESS`) y la completa (`COMPLETED`). El claim es atómico: no pueden reclamar la misma tarea dos agentes. Las dependencias se agregan antes del claim y la tarea dependiente solo se puede reclamar cuando sus prerrequisitos estén completos.
+Creá una tarea con **Nueva tarea** en el panel. Podés elegir una tarea padre para crear una subtarea. La tarea nace en estado `READY`; un agente la reclama (`CLAIMED`), la inicia (`IN_PROGRESS`) y la completa (`COMPLETED`). El claim es atómico: no pueden reclamar la misma tarea dos agentes. Las dependencias se agregan por API antes del claim y la tarea dependiente solo se puede reclamar cuando sus prerrequisitos estén completos.
 
 ```powershell
 $projectId = '<uuid-del-proyecto>'
@@ -173,11 +174,11 @@ El cliente MCP debe usar una cuenta Cognito que sea miembro del proyecto. Las he
 | --- | --- |
 | No puedo ingresar | Debe existir el usuario en Cognito y completarse el cambio de contraseña temporal. |
 | `401` en la API | Usar el **access token** vigente, no el ID token; iniciar sesión otra vez si venció. |
-| `403` o proyecto vacío | Confirmar membresía por `sub`, Project ID correcto y propiedad del workspace para operaciones locales. |
+| `403` o proyecto vacío | Confirmar membresía por `sub`, proyecto seleccionado y propiedad del workspace para operaciones locales. |
 | `409` al reclamar | La tarea ya tiene dueño, el agente ya tiene una tarea activa o falta completar una dependencia. |
 | Bridge sin `workspaceId` | Revisar terminal del Bridge, variables OAuth, navegador de login y membresía en el proyecto. |
 | `sseConnected=false` | Revisar conectividad; el Bridge reintenta y sincroniza el snapshot al reconectar. |
 | Conflicto de archivo | Revisar los intents activos y coordinar con el otro workspace; es una advertencia. |
-| No llegan mensajes al panel | El panel no tiene inbox; consultá `snapshot.inbox` del Bridge destinatario o la API. |
+| No llegan mensajes al panel | El inbox solo muestra mensajes destinados a tus workspaces. Confirmá el workspace de destino y actualizá la vista. |
 
 La infraestructura se gestiona con CloudFormation y CodeBuild. Para despliegue, costos, logs y rollback, consultá [`infra/README.md`](../infra/README.md). El código está en el repositorio privado de GitHub bajo **AGPL-3.0-only**. No hay una integración con agentes Claude u otros modelos reales en esta versión.

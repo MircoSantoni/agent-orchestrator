@@ -195,6 +195,14 @@ public class CoordinationService {
         return store.one("select row_to_json(x)::text from (select * from agent_message where id=?) x", id);
     }
 
+    /** Project-wide traffic metadata. Message bodies remain limited to the recipient inbox. */
+    public String messageFlow(UUID projectId) {
+        store.member(projectId);
+        return store.many("select row_to_json(x)::text from (select id,from_workspace_id,from_agent_id," +
+                "to_workspace_id,to_agent_id,type,status,created_at from agent_message where project_id=? " +
+                "order by created_at desc limit 100) x", projectId);
+    }
+
     public String inbox(UUID workspaceId) {
         store.ownWorkspace(workspaceId);
         return store.many("select row_to_json(x)::text from (select * from agent_message where to_workspace_id=? order by created_at desc) x", workspaceId);

@@ -211,6 +211,35 @@ class ControlPlaneTest {
                 .getStatusCode().value());
     }
 
+    @Test
+    void dashboardDiscoveryKeepsProjectsPrivateAndMessageBodiesInRecipientInbox() {
+        assertEquals("mirco", get("mirco", "/me").get("sub"));
+        String organizationId = get("mirco", "/projects/" + projectId).get("organization_id").toString();
+        List<?> organizations = client.get().uri("/api/v1/organizations")
+                .header("X-Dev-User", "mirco").retrieve().body(List.class);
+        assertTrue(organizations.stream().map(Map.class::cast).anyMatch(o -> organizationId.equals(o.get("id"))));
+        List<?> outsiderOrganizations = client.get().uri("/api/v1/organizations")
+                .header("X-Dev-User", "outsider").retrieve().body(List.class);
+        assertTrue(outsiderOrganizations.stream().map(Map.class::cast).noneMatch(o -> organizationId.equals(o.get("id"))));
+        List<?> projects = client.get().uri("/api/v1/organizations/" + organizationId + "/projects")
+                .header("X-Dev-User", "juan").retrieve().body(List.class);
+        assertTrue(projects.stream().map(Map.class::cast).anyMatch(p -> projectId.equals(p.get("id"))));
+        assertEquals(403, assertThrows(RestClientResponseException.class, () ->
+                client.get().uri("/api/v1/organizations/" + organizationId + "/projects")
+                        .header("X-Dev-User", "outsider").retrieve().body(List.class)).getStatusCode().value());
+
+        post("mirco", "/projects/" + projectId + "/messages", Map.of(
+                "fromWorkspaceId", mircoWorkspace, "toWorkspaceId", juanWorkspace,
+                "type", "COORDINATION_REQUEST", "body", "Private message body"));
+        List<?> flow = client.get().uri("/api/v1/projects/" + projectId + "/message-flow")
+                .header("X-Dev-User", "mirco").retrieve().body(List.class);
+        assertTrue(flow.stream().map(Map.class::cast).anyMatch(m ->
+                juanWorkspace.equals(m.get("to_workspace_id")) && !m.containsKey("body")));
+        assertEquals(403, assertThrows(RestClientResponseException.class, () ->
+                client.get().uri("/api/v1/workspaces/" + juanWorkspace + "/messages")
+                        .header("X-Dev-User", "mirco").retrieve().body(List.class)).getStatusCode().value());
+    }
+
     private int claimAfter(CountDownLatch start, String user, String task, String workspace, String agent) throws Exception {
         start.await();
         try {
