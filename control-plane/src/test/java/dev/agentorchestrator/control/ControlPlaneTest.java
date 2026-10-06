@@ -340,7 +340,7 @@ class ControlPlaneTest {
     }
 
     @Test
-    void dashboardDiscoveryKeepsProjectsPrivateAndMessageBodiesInRecipientInbox() {
+    void dashboardDiscoveryKeepsProjectsPrivateAndShowsMessagesToMembers() {
         assertEquals("mirco", get("mirco", "/me").get("sub"));
         String organizationId = get("mirco", "/projects/" + projectId).get("organization_id").toString();
         List<?> organizations = client.get().uri("/api/v1/organizations")
@@ -369,10 +369,16 @@ class ControlPlaneTest {
         List<?> juanInbox = client.get().uri("/api/v1/projects/" + projectId + "/inbox")
                 .header("X-Dev-User", "juan").retrieve().body(List.class);
         assertTrue(juanInbox.stream().map(Map.class::cast).anyMatch(m ->
-                sentId.equals(m.get("id")) && "Private message body".equals(m.get("body"))));
+                sentId.equals(m.get("id")) && "Private message body".equals(m.get("body"))
+                        && Boolean.TRUE.equals(m.get("recipient_owned"))));
         List<?> mircoInbox = client.get().uri("/api/v1/projects/" + projectId + "/inbox")
                 .header("X-Dev-User", "mirco").retrieve().body(List.class);
-        assertTrue(mircoInbox.stream().map(Map.class::cast).noneMatch(m -> sentId.equals(m.get("id"))));
+        assertTrue(mircoInbox.stream().map(Map.class::cast).anyMatch(m ->
+                sentId.equals(m.get("id")) && "Private message body".equals(m.get("body"))
+                        && Boolean.FALSE.equals(m.get("recipient_owned"))));
+        assertEquals(403, assertThrows(RestClientResponseException.class, () ->
+                client.get().uri("/api/v1/projects/" + projectId + "/inbox")
+                        .header("X-Dev-User", "outsider").retrieve().body(List.class)).getStatusCode().value());
         client.delete().uri("/api/v1/workspaces/" + juanWorkspace)
                 .header("X-Dev-User", "juan").retrieve().toBodilessEntity();
         List<?> archivedInbox = client.get().uri("/api/v1/projects/" + projectId + "/inbox")

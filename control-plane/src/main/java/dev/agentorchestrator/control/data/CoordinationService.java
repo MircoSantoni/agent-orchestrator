@@ -214,14 +214,16 @@ public class CoordinationService {
                 "where m.to_workspace_id=? order by m.created_at desc) x", workspaceId);
     }
 
-    public String personalInbox(UUID projectId) {
+    public String projectInbox(UUID projectId) {
         store.member(projectId);
         return store.many("select row_to_json(x)::text from (select m.*,source.name as from_workspace_name," +
-                "target.name as to_workspace_name from agent_message m " +
+                "target.name as to_workspace_name,source.owner_display_name as from_owner_name," +
+                "target.owner_display_name as to_owner_name," +
+                "(target.owner_id=? and target.deleted_at is null) as recipient_owned from agent_message m " +
                 "join workspace source on source.id=m.from_workspace_id " +
                 "join workspace target on target.id=m.to_workspace_id " +
-                "where m.project_id=? and target.owner_id=? order by m.created_at desc limit 200) x",
-                projectId, store.currentUser());
+                "where m.project_id=? order by m.created_at desc limit 200) x",
+                store.currentUser(), projectId);
     }
 
     @Transactional

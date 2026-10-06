@@ -70,7 +70,7 @@ public class CoordinationApi {
     public String messageFlow(@PathVariable UUID projectId) { return service.messageFlow(projectId); }
 
     @GetMapping(value="/projects/{projectId}/inbox", produces=MediaType.APPLICATION_JSON_VALUE)
-    public String personalInbox(@PathVariable UUID projectId) { return service.personalInbox(projectId); }
+    public String projectInbox(@PathVariable UUID projectId) { return service.projectInbox(projectId); }
 
     @GetMapping(value="/workspaces/{workspaceId}/messages", produces=MediaType.APPLICATION_JSON_VALUE)
     public String inbox(@PathVariable UUID workspaceId) { return service.inbox(workspaceId); }
