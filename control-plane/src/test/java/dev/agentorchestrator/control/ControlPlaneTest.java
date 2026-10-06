@@ -83,6 +83,50 @@ class ControlPlaneTest {
         return client.get().uri("/api/v1" + path).header("X-Dev-User", user).retrieve().body(Map.class);
     }
 
+    private Map<?, ?> mcp(String user, String method, String name, Map<String, Object> arguments) {
+        Map<String, Object> params = new java.util.HashMap<>();
+        params.put("_meta", Map.of("io.modelcontextprotocol/protocolVersion", "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities", Map.of()));
+        if (name != null) { params.put("name", name); params.put("arguments", arguments); }
+        var request = client.post().uri("/mcp").header("X-Dev-User", user)
+                .header("MCP-Protocol-Version", "2026-07-28").header("Mcp-Method", method)
+                .headers(headers -> { if (name != null) headers.add("Mcp-Name", name); })
+                .contentType(MediaType.APPLICATION_JSON).accept(MediaType.APPLICATION_JSON, MediaType.TEXT_EVENT_STREAM)
+                .body(Map.of("jsonrpc", "2.0", "id", 1, "method", method, "params", params));
+        return request.retrieve().body(Map.class);
+    }
+
+    @Test
+    void mcpCoordinatesThroughSameAuthorizationAndKeepsApprovalHuman() {
+        Map<?, ?> discovery = (Map<?, ?>) mcp("mirco", "server/discover", null, Map.of()).get("result");
+        assertEquals(List.of("2026-07-28"), discovery.get("supportedVersions"));
+        Map<?, ?> listed = (Map<?, ?>) mcp("mirco", "tools/list", null, Map.of()).get("result");
+        List<?> tools = (List<?>) listed.get("tools");
+        assertTrue(tools.stream().map(Map.class::cast).anyMatch(t -> "claim_task".equals(t.get("name"))));
+        assertTrue(tools.stream().map(Map.class::cast).noneMatch(t -> "approve_proposal".equals(t.get("name"))));
+
+        String task = id(post("mirco", "/projects/" + projectId + "/tasks", Map.of("title", "MCP task")));
+        Map<?, ?> claim = (Map<?, ?>) mcp("mirco", "tools/call", "claim_task", Map.of(
+                "taskId", task, "workspaceId", mircoWorkspace, "agentId", mircoAgent)).get("result");
+        assertEquals(false, claim.get("isError"));
+        assertEquals("CLAIMED", get("mirco", "/tasks/" + task).get("status"));
+
+        Map<?, ?> denied = (Map<?, ?>) mcp("juan", "tools/call", "claim_task", Map.of(
+                "taskId", task, "workspaceId", mircoWorkspace, "agentId", juanAgent)).get("result");
+        assertEquals(true, denied.get("isError"));
+        Map<?, ?> outsider = (Map<?, ?>) mcp("outsider", "tools/call", "list_tasks", Map.of("projectId", projectId)).get("result");
+        assertEquals(true, outsider.get("isError"));
+
+        Map<?, ?> proposal = (Map<?, ?>) mcp("mirco", "tools/call", "propose_context", Map.of(
+                "projectId", projectId, "workspaceId", mircoWorkspace, "agentId", mircoAgent,
+                "title", "Design", "content", "Use an MCP adapter")).get("result");
+        assertEquals(false, proposal.get("isError"));
+        List<?> context = client.get().uri("/api/v1/projects/" + projectId + "/context")
+                .header("X-Dev-User", "mirco").retrieve().body(List.class);
+        assertTrue(context.stream().map(Map.class::cast).anyMatch(entry ->
+                "Design".equals(entry.get("title")) && "PENDING_APPROVAL".equals(entry.get("status"))));
+    }
+
     @Test
     void onlyOneAgentCanClaimReadyTask() throws Exception {
         String task = id(post("mirco", "/projects/" + projectId + "/tasks", Map.of("title", "Concurrent claim")));

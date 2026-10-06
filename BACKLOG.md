@@ -102,7 +102,17 @@ Coordinar por Internet a varias personas, cada una con su propio orquestador y a
 | AB-004 | Implementar comandos/API local para estado, tareas, intents y mensajes. | Dos instancias simuladas completan el flujo del primer demo. |
 | AB-005 | Permitir ejecutar tres instancias con configuraciones separadas. | Mirco, Juan y Sofía se observan en el mismo proyecto. |
 
-### H. Despliegue AWS y validación (M3)
+### H. MCP remoto (M2)
+
+| ID | Tarea | Criterio de aceptación |
+| --- | --- | --- |
+| MCP-001 | Exponer `server/discover`, `tools/list` y `tools/call` en `/mcp` con Streamable HTTP 2026-07-28. | Un cliente obtiene el catálogo y llama herramientas sin sesiones del transporte. Implementado en MVP. |
+| MCP-002 | Mapear lectura, claim, intents, propuestas, mensajes y handoff a los servicios existentes. | Los mismos permisos, conflictos y estados aplican por REST y MCP; la aprobación humana no figura como herramienta. Implementado en MVP. |
+| MCP-003 | Validar interoperabilidad con clientes MCP externos y soportar la revisión 2025 si resulta necesaria. | Codex y al menos otro cliente completan descubrimiento, lectura y claim. |
+| MCP-004 | Completar el flujo OAuth/OIDC para clientes MCP remotos. | Un cliente obtiene y renueva credenciales sin copiar tokens manualmente. |
+| MCP-005 | Ampliar cobertura de protocolo, observabilidad y límites de peticiones. | Pruebas de conformidad y métricas de herramientas en CI. |
+
+### I. Despliegue AWS y validación (M3)
 
 | ID | Tarea | Criterio de aceptación |
 | --- | --- | --- |
