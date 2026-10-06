@@ -83,4 +83,13 @@ Verificar `/actuator/health`, metadatos OAuth en `/.well-known/oauth-protected-r
 
 Para una versión nueva, ejecutar CodeBuild con un commit nuevo, comprobar que la imagen existe en ECR y actualizar `ImageTag` en el stack de aplicación. Para rollback, desplegar el tag anterior. Las migraciones Flyway deben ser compatibles con la versión anterior si se necesita ese rollback. La base de datos tiene backup automático y política Snapshot al eliminar el recurso, pero la restauración es una operación separada.
 
-La validación local con `cfn-lint` confirma sintaxis y tipos de recursos; la creación y el comportamiento de AWS se verificarán únicamente con la cuenta final. La plantilla no incluye WAF, Multi-AZ de RDS, rotación automática de credenciales, alarmas de latencia/error ni un pipeline de despliegue automático.
+La validación local con `cfn-lint` confirma sintaxis y tipos de recursos. La plantilla no incluye WAF, Multi-AZ de RDS, rotación automática de credenciales, alarmas de latencia/error ni un pipeline de despliegue automático.
+
+## Despliegue realizado el 6 de octubre de 2026
+
+- Cuenta `581586866881`, región `us-east-1`, stacks `agent-orchestrator-build` y `agent-orchestrator-app`.
+- URL pública: `https://d3tlsuzwwbes8y.cloudfront.net`; MCP: `https://d3tlsuzwwbes8y.cloudfront.net/mcp`.
+- La imagen de aplicación se publicó en ECR con tag `2a860b8266ac`. El commit posterior `efeac40` ajusta solamente tiempos de health check de CloudFormation.
+- Build inicial desde ZIP privado de S3. El repositorio GitHub y CodeConnections quedan pendientes de vincular.
+- El pool Cognito solo permite usuarios creados por administración. Todavía falta invitar al primer usuario y confirmar las callback URLs de clientes MCP que se conectarán.
+- El stack usa la prefix list `pl-3b927c52` para permitir tráfico de CloudFront al ALB privado. Sin esa regla, las solicitudes públicas quedan esperando hasta timeout.
