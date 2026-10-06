@@ -13,7 +13,7 @@ Los Bridges siguen en las PCs. El Security Group de ECS solo acepta tráfico del
 
 - Cuenta AWS, región y un perfil AWS CLI con permisos de CloudFormation, IAM, CodeBuild, CodeConnections, ECR, ECS, EC2/VPC, ELB, ACM, Route 53, RDS, Cognito, Logs y Budgets.
 - Repositorio GitHub publicado y conexión CodeConnections autorizada para leerlo. Una conexión creada por CloudFormation queda pendiente hasta autorizarla; por eso el stack de build recibe un ARN ya activo.
-- Dominio con Hosted Zone pública de Route 53 en la cuenta, presupuesto mensual y correo de alerta.
+- Dominio con Hosted Zone pública de Route 53 en la cuenta, presupuesto mensual y correo de alerta. La plantilla usa USD 10 como valor inicial del presupuesto; antes de aplicarla hay que comprobar si ya existe un presupuesto para evitar alertas duplicadas.
 - Callback URLs de los clientes MCP reales y usuarios para invitar a Cognito.
 - Revisión del coste regional en AWS Pricing Calculator antes de crear los stacks.
 

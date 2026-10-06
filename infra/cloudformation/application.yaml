@@ -40,7 +40,7 @@ Parameters:
     Default: ''
   BudgetLimitUsd:
     Type: Number
-    Default: 60
+    Default: 10
     MinValue: 1
 Conditions:
   HasBudgetEmail: !Not [!Equals [!Ref BudgetEmail, '']]
