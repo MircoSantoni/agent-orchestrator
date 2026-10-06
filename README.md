@@ -53,7 +53,7 @@ En producción, el endpoint anuncia `/.well-known/oauth-protected-resource`; Cog
 
 ## AWS
 
-La topología, variables, bootstrap, despliegue y rollback están documentados en `infra/README.md`. CloudFormation creó una URL HTTPS `*.cloudfront.net`, sin dominio propio. La cuenta personal usa el perfil `personal-AdminDev` en `us-east-1`. El repositorio todavía no está publicado en GitHub; CodeBuild usa un ZIP privado de S3 como fuente.
+La topología, variables, bootstrap, despliegue y rollback están documentados en `infra/README.md`. CloudFormation creó una URL HTTPS `*.cloudfront.net`, sin dominio propio. La cuenta personal usa el perfil `personal-AdminDev` en `us-east-1`. El repositorio privado está en [GitHub](https://github.com/MircoSantoni/agent-orchestrator); CodeBuild sigue usando un ZIP privado de S3 como fuente.
 
 ## Licencia
 

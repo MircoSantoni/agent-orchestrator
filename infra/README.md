@@ -90,6 +90,6 @@ La validación local con `cfn-lint` confirma sintaxis y tipos de recursos. La pl
 - Región `us-east-1`, stacks `agent-orchestrator-build` y `agent-orchestrator-app`.
 - URL pública: `https://d3tlsuzwwbes8y.cloudfront.net`; MCP: `https://d3tlsuzwwbes8y.cloudfront.net/mcp`.
 - La imagen de aplicación validada se publicó en ECR con tag `a232e239350f`.
-- Build inicial desde ZIP privado de S3. El repositorio GitHub y CodeConnections quedan pendientes de vincular.
+- Build desde ZIP privado de S3. El repositorio está en GitHub; CodeConnections sigue pendiente de vincular si se desea que los builds se inicien desde commits remotos.
 - El pool Cognito solo permite usuarios creados por administración. Todavía falta invitar al primer usuario y confirmar las callback URLs de clientes MCP que se conectarán.
 - El stack usa la prefix list `pl-3b927c52` para permitir tráfico de CloudFront al ALB privado. Sin esa regla, las solicitudes públicas quedan esperando hasta timeout.
