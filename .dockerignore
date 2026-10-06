@@ -1,0 +1,4 @@
+.git
+work
+**/target
+*.log

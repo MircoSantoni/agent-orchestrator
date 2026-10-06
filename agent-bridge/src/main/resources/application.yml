@@ -1,0 +1,11 @@
+server:
+  address: 127.0.0.1
+  port: ${BRIDGE_PORT:8091}
+bridge:
+  control-plane-url: ${CONTROL_PLANE_URL:http://localhost:8080}
+  token: ${BRIDGE_TOKEN:}
+  project-id: ${BRIDGE_PROJECT_ID:}
+  owner-id: ${BRIDGE_OWNER_ID:local-user}
+  owner-name: ${BRIDGE_OWNER_NAME:Local User}
+  workspace-name: ${BRIDGE_WORKSPACE_NAME:local-pc}
+  orchestrator-name: ${BRIDGE_ORCHESTRATOR_NAME:simulated-orchestrator}

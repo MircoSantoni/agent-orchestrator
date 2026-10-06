@@ -1,0 +1,6 @@
+work/
+target/
+**/target/
+.idea/
+.env
+*.log

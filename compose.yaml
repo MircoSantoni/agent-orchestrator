@@ -1,0 +1,31 @@
+services:
+  control-plane:
+    profiles: [app]
+    build: .
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/agent_orchestrator
+      DATABASE_USER: agent_orchestrator
+      DATABASE_PASSWORD: local-dev-only
+      SPRING_PROFILES_ACTIVE: dev
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: agent_orchestrator
+      POSTGRES_USER: agent_orchestrator
+      POSTGRES_PASSWORD: local-dev-only
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent_orchestrator -d agent_orchestrator"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  postgres_data:

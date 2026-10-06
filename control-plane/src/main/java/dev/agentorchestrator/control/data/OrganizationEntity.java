@@ -1,0 +1,24 @@
+package dev.agentorchestrator.control.data;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import java.time.Instant;
+import java.util.UUID;
+
+@Entity
+@Table(name = "organization")
+public class OrganizationEntity {
+    @Id public UUID id;
+    @Column(nullable = false) public String name;
+    @Column(nullable = false, unique = true) public String slug;
+    @Column(name = "created_at", nullable = false) public Instant createdAt;
+    @Column(name = "updated_at", nullable = false) public Instant updatedAt;
+
+    protected OrganizationEntity() {}
+    public OrganizationEntity(String name, String slug) {
+        this.id = UUID.randomUUID(); this.name = name; this.slug = slug;
+        this.createdAt = Instant.now(); this.updatedAt = this.createdAt;
+    }
+}
