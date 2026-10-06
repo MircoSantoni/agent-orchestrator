@@ -89,7 +89,7 @@ La validación local con `cfn-lint` confirma sintaxis y tipos de recursos. La pl
 
 - Región `us-east-1`, stacks `agent-orchestrator-build` y `agent-orchestrator-app`.
 - URL pública: `https://d3tlsuzwwbes8y.cloudfront.net`; MCP: `https://d3tlsuzwwbes8y.cloudfront.net/mcp`.
-- La imagen de aplicación activa se publicó en ECR con tag `1172773d1755` (conexión MCP directa para Claude con credenciales revocables).
+- La imagen de aplicación activa se publicó en ECR con tag `53060d5f0000` (gestión de workspaces y tareas por MCP, resúmenes de mensajes en el panel).
 - Build desde ZIP privado de S3. El repositorio está en GitHub; CodeConnections sigue pendiente de vincular si se desea que los builds se inicien desde commits remotos.
 - El pool Cognito solo permite usuarios creados por administración. Las primeras cuentas se crearon en octubre de 2026; desde esta versión, los administradores de proyecto pueden invitar por correo desde el panel. Las callback URLs de clientes MCP reales aún deben configurarse según el cliente elegido.
 - El stack usa la prefix list `pl-3b927c52` para permitir tráfico de CloudFront al ALB privado. Sin esa regla, las solicitudes públicas quedan esperando hasta timeout.

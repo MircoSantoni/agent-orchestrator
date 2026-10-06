@@ -69,6 +69,9 @@ public class CoordinationApi {
     @GetMapping(value="/projects/{projectId}/message-flow", produces=MediaType.APPLICATION_JSON_VALUE)
     public String messageFlow(@PathVariable UUID projectId) { return service.messageFlow(projectId); }
 
+    @GetMapping(value="/projects/{projectId}/inbox", produces=MediaType.APPLICATION_JSON_VALUE)
+    public String personalInbox(@PathVariable UUID projectId) { return service.personalInbox(projectId); }
+
     @GetMapping(value="/workspaces/{workspaceId}/messages", produces=MediaType.APPLICATION_JSON_VALUE)
     public String inbox(@PathVariable UUID workspaceId) { return service.inbox(workspaceId); }
 

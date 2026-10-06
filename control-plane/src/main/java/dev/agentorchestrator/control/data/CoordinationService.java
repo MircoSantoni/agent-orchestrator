@@ -200,6 +200,7 @@ public class CoordinationService {
         store.member(projectId);
         return store.many("select row_to_json(x)::text from (select m.id,m.from_workspace_id,m.from_agent_id," +
                 "m.to_workspace_id,m.to_agent_id,source.name as from_workspace_name,target.name as to_workspace_name," +
+                "source.owner_display_name as from_owner_name,target.owner_display_name as to_owner_name," +
                 "m.type,m.status,left(coalesce(nullif(trim(m.subject),''),m.body),180) as summary," +
                 "m.created_at from agent_message m join workspace source on source.id=m.from_workspace_id " +
                 "left join workspace target on target.id=m.to_workspace_id where m.project_id=? " +
@@ -211,6 +212,16 @@ public class CoordinationService {
         return store.many("select row_to_json(x)::text from (select m.*,source.name as from_workspace_name " +
                 "from agent_message m join workspace source on source.id=m.from_workspace_id " +
                 "where m.to_workspace_id=? order by m.created_at desc) x", workspaceId);
+    }
+
+    public String personalInbox(UUID projectId) {
+        store.member(projectId);
+        return store.many("select row_to_json(x)::text from (select m.*,source.name as from_workspace_name," +
+                "target.name as to_workspace_name from agent_message m " +
+                "join workspace source on source.id=m.from_workspace_id " +
+                "join workspace target on target.id=m.to_workspace_id " +
+                "where m.project_id=? and target.owner_id=? order by m.created_at desc limit 200) x",
+                projectId, store.currentUser());
     }
 
     @Transactional

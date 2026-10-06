@@ -58,7 +58,7 @@ La respuesta indica `INVITED` si se solicitó un correo nuevo, `RESENT` si se re
 
 1. Abrí la URL pública e iniciá sesión. Elegí organización y proyecto en la barra lateral.
 2. **Resumen** muestra métricas, workspaces conectados por mensajes, tareas, actividad y propuestas pendientes.
-3. **Tareas** permite crear tareas y subtareas. **Comunicación** muestra un resumen de cada mensaje para los miembros del proyecto y el cuerpo completo en el inbox del workspace destinatario. La vista se actualiza cada 15 segundos. Para escribir desde el panel, pulsá **Conectar espacio web para enviar** si todavía no tenés un workspace propio.
+3. **Tareas** permite crear tareas y subtareas. **Comunicación** muestra un resumen de cada mensaje para los miembros del proyecto y el cuerpo completo en el inbox de la cuenta destinataria. Ese inbox reúne mensajes de todos sus workspaces, incluso los archivados, y muestra los 200 más recientes. La vista se actualiza cada 15 segundos. Para escribir desde el panel, pulsá **Conectar espacio web para enviar** si todavía no tenés un workspace propio.
 4. **Contexto** permite publicar hechos, descubrimientos, suposiciones y propuestas. En una propuesta pendiente, usá **Aprobar** o **Rechazar**. Aprobar crea una entrada `DECISION`.
 5. **Equipo y agentes** muestra miembros, invitaciones pendientes, workspaces y agentes. Permite invitar por correo, reenviar una invitación pendiente y cambiar el nombre o eliminar tus workspaces. Eliminar retira el workspace activo sin borrar mensajes ni auditoría; antes hay que completar o liberar sus tareas activas. **Arquitectura** explica el camino Panel/Bridge/MCP → CloudFront → Control Plane → PostgreSQL y el papel de Cognito/SSE.
 
@@ -184,6 +184,6 @@ El cliente puede llamar `heartbeat_agent` para mantener el estado de presencia m
 | Bridge sin `workspaceId` | Revisar terminal del Bridge, variables OAuth, navegador de login y membresía en el proyecto. |
 | `sseConnected=false` | Revisar conectividad; el Bridge reintenta y sincroniza el snapshot al reconectar. |
 | Conflicto de archivo | Revisar los intents activos y coordinar con el otro workspace; es una advertencia. |
-| No llegan mensajes al panel | El inbox solo muestra mensajes destinados a tus workspaces. Confirmá el workspace de destino y actualizá la vista. |
+| El inbox queda vacío | Solo incluye mensajes destinados a workspaces propiedad de la cuenta conectada. En **Comunicación → Flujo reciente** se ven los resúmenes del proyecto. Al enviar desde el panel, elegí el destinatario por nombre y propietario; confirmá que la otra persona conectó su propio workspace con su cuenta. El inbox personal incluye workspaces archivados. |
 
 La infraestructura se gestiona con CloudFormation y CodeBuild. Para despliegue, costos, logs y rollback, consultá [`infra/README.md`](../infra/README.md). El código está en el repositorio privado de GitHub bajo **AGPL-3.0-only**. Claude usa el MCP remoto con una credencial personal enviada por encabezado; el servidor no incluye un ejecutor de modelos.

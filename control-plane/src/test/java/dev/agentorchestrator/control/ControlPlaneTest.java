@@ -356,9 +356,9 @@ class ControlPlaneTest {
                 client.get().uri("/api/v1/organizations/" + organizationId + "/projects")
                         .header("X-Dev-User", "outsider").retrieve().body(List.class)).getStatusCode().value());
 
-        post("mirco", "/projects/" + projectId + "/messages", Map.of(
+        String sentId = id(post("mirco", "/projects/" + projectId + "/messages", Map.of(
                 "fromWorkspaceId", mircoWorkspace, "toWorkspaceId", juanWorkspace,
-                "type", "COORDINATION_REQUEST", "body", "Private message body"));
+                "type", "COORDINATION_REQUEST", "body", "Private message body")));
         List<?> flow = client.get().uri("/api/v1/projects/" + projectId + "/message-flow")
                 .header("X-Dev-User", "mirco").retrieve().body(List.class);
         assertTrue(flow.stream().map(Map.class::cast).anyMatch(m ->
@@ -366,6 +366,18 @@ class ControlPlaneTest {
         assertEquals(403, assertThrows(RestClientResponseException.class, () ->
                 client.get().uri("/api/v1/workspaces/" + juanWorkspace + "/messages")
                         .header("X-Dev-User", "mirco").retrieve().body(List.class)).getStatusCode().value());
+        List<?> juanInbox = client.get().uri("/api/v1/projects/" + projectId + "/inbox")
+                .header("X-Dev-User", "juan").retrieve().body(List.class);
+        assertTrue(juanInbox.stream().map(Map.class::cast).anyMatch(m ->
+                sentId.equals(m.get("id")) && "Private message body".equals(m.get("body"))));
+        List<?> mircoInbox = client.get().uri("/api/v1/projects/" + projectId + "/inbox")
+                .header("X-Dev-User", "mirco").retrieve().body(List.class);
+        assertTrue(mircoInbox.stream().map(Map.class::cast).noneMatch(m -> sentId.equals(m.get("id"))));
+        client.delete().uri("/api/v1/workspaces/" + juanWorkspace)
+                .header("X-Dev-User", "juan").retrieve().toBodilessEntity();
+        List<?> archivedInbox = client.get().uri("/api/v1/projects/" + projectId + "/inbox")
+                .header("X-Dev-User", "juan").retrieve().body(List.class);
+        assertTrue(archivedInbox.stream().map(Map.class::cast).anyMatch(m -> sentId.equals(m.get("id"))));
     }
 
     @Test
