@@ -6,7 +6,7 @@ Control Plane para coordinar personas y agentes sobre un proyecto compartido. Po
 
 ## Estado
 
-El MVP local cubre el escenario de tres Bridges, claim atómico, dependencias y subtareas, intents con detección de solapamiento, propuestas con aprobación humana, mensajería y recuperación tras cortes SSE. El panel permite crear organizaciones, proyectos, tareas, contexto y mensajes; también muestra la red de workspaces y el flujo de servicios. El despliegue AWS está activo en `us-east-1` mediante dos stacks CloudFormation y CodeBuild, con URL pública `https://d3tlsuzwwbes8y.cloudfront.net`. La integración con Claude real sigue fuera del alcance de esta primera versión: los Bridges son simulados.
+El MVP cubre claim atómico, dependencias y subtareas, intents con detección de solapamiento, propuestas con aprobación humana y mensajería. El panel permite crear organizaciones, proyectos, tareas, contexto y mensajes; también muestra la red de workspaces y el flujo de servicios. El despliegue AWS está activo en `us-east-1` mediante dos stacks CloudFormation y CodeBuild, con URL pública `https://d3tlsuzwwbes8y.cloudfront.net`. Un cliente con MCP remoto y OAuth puede conectarse directamente: el Bridge local es opcional. El servidor coordina agentes, pero no ejecuta modelos por sí mismo.
 
 ## Requisitos locales
 
@@ -26,7 +26,7 @@ java -jar control-plane/target/control-plane-0.1.0-SNAPSHOT.jar
 
 Como alternativa, `docker compose --profile app up --build -d` inicia PostgreSQL y Control Plane en contenedores. Abrí `http://127.0.0.1:8080/` para el panel. En el perfil `dev`, la identidad de demostración se indica con `X-Dev-User`; este perfil debe quedar restringido al equipo local.
 
-## Bridge simulado
+## Bridge local opcional
 
 Después de crear un proyecto y sus miembros, iniciá una instancia por persona, con `BRIDGE_PORT`, `BRIDGE_WORKSPACE_NAME` y `BRIDGE_OWNER_ID` propios:
 
@@ -49,7 +49,7 @@ En producción, Spring valida la firma JWT mediante el JWKS del issuer OIDC, emi
 
 ## MCP remoto
 
-`POST /mcp` soporta la negociación `2025-11-25` (`initialize`, `tools/list`, `tools/call`) y el subconjunto stateless `2026-07-28` (`server/discover`, `tools/list`, `tools/call`). La versión 2025 se verificó con `io.modelcontextprotocol.sdk:mcp:2.0.1`; la versión 2026 tiene pruebas de protocolo HTTP. Las herramientas son `get_project`, `list_tasks`, `list_agents`, `list_context`, `list_resource_intents`, `list_inbox`, `claim_task`, `announce_resource_intent`, `propose_context`, `send_message` y `accept_handoff`. Ninguna permite aprobar propuestas.
+`POST /mcp` soporta la negociación `2025-11-25` (`initialize`, `tools/list`, `tools/call`) y el subconjunto stateless `2026-07-28` (`server/discover`, `tools/list`, `tools/call`). La versión 2025 se verificó con `io.modelcontextprotocol.sdk:mcp:2.0.1`; la versión 2026 tiene pruebas de protocolo HTTP. Un agente remoto puede usar `list_projects` y `connect_agent` para registrarse sin instalar este repositorio, descubrir workspaces y tareas, mantener presencia, reclamar/iniciar/completar tareas, intercambiar mensajes y proponer contexto. Ninguna herramienta permite aprobar propuestas.
 
 En producción, el endpoint anuncia `/.well-known/oauth-protected-resource`; Cognito funciona como authorization server. El cliente MCP debe registrar previamente su callback en `mcp_callback_urls`, usar Authorization Code + PKCE y pedir el scope y resource publicados. El cliente debe conservar y renovar sus credenciales según su implementación. Las capacidades MCP se limitan a herramientas; no hay recursos, prompts, sesiones ni servidor de autorización propio. Los clientes web con `Origin` requieren inclusión exacta en `APP_MCP_ALLOWED_ORIGINS`.
 

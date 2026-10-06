@@ -4,9 +4,9 @@ Actualizado: 6 de octubre de 2026. Este manual describe la versión desplegada e
 
 ## 1. Qué hace el sistema
 
-Agent Orchestrator coordina personas y agentes simulados dentro de un **proyecto**. Cada persona entra con su propia cuenta de Cognito y puede tener un **workspace** (su computadora) con un orquestador y varios agentes. El servidor guarda tareas, dependencias, contexto, mensajes, intenciones de uso de archivos y actividad. El Bridge local mantiene la presencia y recibe cambios por SSE; el panel web permite crear proyectos, tareas, contexto y mensajes, ver el flujo entre workspaces y decidir propuestas. También hay una API REST y un endpoint MCP para clientes compatibles.
+Agent Orchestrator coordina personas y agentes dentro de un **proyecto**. Cada persona entra con su propia cuenta de Cognito. Un cliente MCP remoto puede registrar su workspace y agente directamente en el servicio AWS; también existe un Bridge local opcional para mantener presencia y recibir cambios por SSE. El servidor guarda tareas, dependencias, contexto, mensajes, intenciones de uso de archivos y actividad. El panel web permite crear proyectos, tareas, contexto y mensajes, ver el flujo entre workspaces y decidir propuestas.
 
-El Bridge registra y coordina agentes simulados; **no ejecuta un modelo ni lee archivos de la computadora**. El contenido de mensajes, contexto y tareas lo envía el usuario o un cliente que use la API/MCP.
+El servidor **no ejecuta un modelo ni lee archivos de la computadora**. El contenido de mensajes, contexto y tareas lo envía el usuario o un cliente que use la API/MCP.
 
 ## 2. Dirección y acceso
 
@@ -80,7 +80,7 @@ Invoke-RestMethod -Uri "$api/projects/$projectId/tasks" -Headers $headers
 
 Para crear una subtarea directamente, agregá `parentTaskId` al cuerpo de creación. Para definir una dependencia entre dos tareas, usá `POST /api/v1/tasks/{taskId}/dependencies` con `{"dependsOnTaskId":"<uuid>"}` antes de reclamar la tarea.
 
-### Bridge simulado en una computadora
+### Bridge local opcional en una computadora
 
 Necesitás Java 25 y un JAR construido desde el repositorio con `mvn package -DskipTests`. En la misma computadora donde corre el Bridge, configurá las variables siguientes. Cada persona debe iniciar sesión con **su propia cuenta Cognito** y usar un puerto y nombre de workspace propios. El Bridge escucha solo en `127.0.0.1`.
 
@@ -156,7 +156,7 @@ Usá `POST /api/v1/projects/{projectId}/context` con `type`, `title` y `content`
 
 `POST /api/v1/projects/{projectId}/resource-intents` anuncia que un agente leerá (`READ`) o escribirá (`WRITE`) un recurso `FILE`, `DIRECTORY`, `MODULE`, `SERVICE` o `REPOSITORY`. `resourcePath` es relativo al repositorio, por ejemplo `src/api/Users.java`; `leaseSeconds` va de 30 a 3600. Podés vincularlo a `taskId` si el agente ya posee esa tarea. Un solapamiento genera un evento `RESOURCE_CONFLICT_DETECTED`, **pero no bloquea** la acción. Renovalo con `POST /api/v1/resource-intents/{id}/renew` y liberalo con `DELETE /api/v1/resource-intents/{id}` al terminar.
 
-## 7. Conectar un cliente MCP
+## 7. Conectar agentes directamente por MCP
 
 El servidor está en `https://d3tlsuzwwbes8y.cloudfront.net/mcp`. Antes de conectarlo, registrá la URL de callback exacta del cliente MCP en el parámetro `McpCallbackUrls` del stack CloudFormation y actualizá el stack. Configurá el cliente para Authorization Code + PKCE con:
 
@@ -166,7 +166,15 @@ El servidor está en `https://d3tlsuzwwbes8y.cloudfront.net/mcp`. Antes de conec
 - Resource: `https://d3tlsuzwwbes8y.cloudfront.net`
 - Metadata del recurso: `https://d3tlsuzwwbes8y.cloudfront.net/.well-known/oauth-protected-resource`
 
-El cliente MCP debe usar una cuenta Cognito que sea miembro del proyecto. Las herramientas disponibles son `get_project`, `list_tasks`, `list_agents`, `list_context`, `list_resource_intents`, `list_inbox`, `claim_task`, `announce_resource_intent`, `propose_context`, `send_message` y `accept_handoff`. Este endpoint expone herramientas; no expone recursos, prompts ni ejecución de modelos. Las aprobaciones siguen siendo humanas desde el panel. Si el cliente no puede autenticarse, comprobá primero que su callback coincida exactamente con la registrada y que pida el scope y resource indicados.
+El cliente MCP debe usar la cuenta Cognito de una persona que sea miembro del proyecto. No necesita instalar este repositorio ni ejecutar el Bridge. Flujo recomendado:
+
+1. Conectá el cliente MCP a la URL anterior y completá su inicio de sesión OAuth.
+2. Llamá `list_projects` para obtener los proyectos visibles para esa cuenta.
+3. Llamá `connect_agent` con `projectId`, `workspaceName`, `displayName`, `agentKey` y `agentName`; `role` y `model` son opcionales. El resultado incluye `workspaceId`, `orchestratorId` y `agentId`. Repetir con las mismas claves reutiliza los registros. Usá una clave distinta por agente y el mismo workspace si comparten propietario.
+4. Llamá `list_tasks`, `list_workspaces` y `list_agents` para descubrir trabajo y destinatarios. Usá `claim_task` con `taskId`, `workspaceId` y `agentId`, seguido de `start_task` y `complete_task`.
+5. Usá `send_message` para comunicarte con otro workspace; el destinatario usa `list_inbox`, `read_message` y `ack_message`. También están `propose_context`, `announce_resource_intent` y `accept_handoff`.
+
+El cliente puede llamar `heartbeat_agent` para mantener el estado de presencia mientras esté activo. Sin una llamada de presencia durante 45 segundos, el servidor mostrará el agente como offline; podrá volver a conectarse con `connect_agent`. El endpoint expone herramientas, pero no ejecuta modelos ni concede aprobación automática de propuestas. Las aprobaciones siguen siendo humanas desde el panel. Si el cliente no puede autenticarse, comprobá que su callback coincida exactamente con la registrada y que pida el scope y resource indicados.
 
 ## 8. Errores frecuentes y operación
 
@@ -181,4 +189,4 @@ El cliente MCP debe usar una cuenta Cognito que sea miembro del proyecto. Las he
 | Conflicto de archivo | Revisar los intents activos y coordinar con el otro workspace; es una advertencia. |
 | No llegan mensajes al panel | El inbox solo muestra mensajes destinados a tus workspaces. Confirmá el workspace de destino y actualizá la vista. |
 
-La infraestructura se gestiona con CloudFormation y CodeBuild. Para despliegue, costos, logs y rollback, consultá [`infra/README.md`](../infra/README.md). El código está en el repositorio privado de GitHub bajo **AGPL-3.0-only**. No hay una integración con agentes Claude u otros modelos reales en esta versión.
+La infraestructura se gestiona con CloudFormation y CodeBuild. Para despliegue, costos, logs y rollback, consultá [`infra/README.md`](../infra/README.md). El código está en el repositorio privado de GitHub bajo **AGPL-3.0-only**. Cualquier cliente compatible con MCP remoto y el OAuth configurado puede usar las herramientas; el servidor no incluye un ejecutor de modelos.

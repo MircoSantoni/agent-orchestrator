@@ -39,16 +39,24 @@ public class McpApi {
         this.allowedOrigins = allowedOrigins.isBlank() ? List.of() :
                 List.of(allowedOrigins.split(",")).stream().map(String::trim).toList();
         this.tools = List.of(
+                tool("list_projects", "List projects available to this account", fields()),
                 tool("get_project", "Read project details", fields("projectId", "string"), "projectId"),
+                tool("list_workspaces", "List project workspaces and their owners", fields("projectId", "string"), "projectId"),
                 tool("list_tasks", "List project tasks and their owners", fields("projectId", "string"), "projectId"),
                 tool("list_agents", "List agents working in a project", fields("projectId", "string"), "projectId"),
                 tool("list_context", "List project facts, proposals and approved decisions", fields("projectId", "string"), "projectId"),
                 tool("list_resource_intents", "List resource intents and conflicts in a project", fields("projectId", "string"), "projectId"),
                 tool("list_inbox", "List messages for a workspace you own", fields("workspaceId", "string"), "workspaceId"),
+                tool("connect_agent", "Register an agent directly through MCP; repeat with the same keys to reconnect", fields("projectId", "string", "workspaceName", "string", "displayName", "string", "agentKey", "string", "agentName", "string", "role", "string", "model", "string"), "projectId", "workspaceName", "displayName", "agentKey", "agentName"),
+                tool("heartbeat_agent", "Refresh presence for an agent and its remote workspace", fields("agentId", "string"), "agentId"),
                 tool("claim_task", "Atomically claim a ready task for your agent", fields("taskId", "string", "workspaceId", "string", "agentId", "string"), "taskId", "workspaceId", "agentId"),
+                tool("start_task", "Start a task claimed by your agent", fields("taskId", "string"), "taskId"),
+                tool("complete_task", "Complete a task owned by your workspace", fields("taskId", "string"), "taskId"),
                 tool("announce_resource_intent", "Declare a read or write intent before touching a resource", fields("projectId", "string", "workspaceId", "string", "agentId", "string", "taskId", "string", "resourceType", "string", "resourcePath", "string", "intentType", "string", "leaseSeconds", "integer"), "projectId", "workspaceId", "agentId", "resourceType", "resourcePath", "intentType", "leaseSeconds"),
                 tool("propose_context", "Create a proposal pending human approval", fields("projectId", "string", "workspaceId", "string", "agentId", "string", "taskId", "string", "title", "string", "content", "string"), "projectId", "title", "content"),
                 tool("send_message", "Send a coordination message or task handoff", fields("projectId", "string", "fromWorkspaceId", "string", "fromAgentId", "string", "toWorkspaceId", "string", "toAgentId", "string", "taskId", "string", "type", "string", "subject", "string", "body", "string"), "projectId", "fromWorkspaceId", "toWorkspaceId", "type", "body"),
+                tool("read_message", "Mark a message in your inbox as read", fields("messageId", "string"), "messageId"),
+                tool("ack_message", "Acknowledge a message in your inbox", fields("messageId", "string"), "messageId"),
                 tool("accept_handoff", "Accept a handoff message and create its child task", fields("messageId", "string"), "messageId"));
     }
 
@@ -135,15 +143,38 @@ public class McpApi {
 
     private String execute(String name, Map<?, ?> a) {
         return switch (name) {
+            case "list_projects" -> store.projects();
             case "get_project" -> store.project(uuid(a, "projectId"));
+            case "list_workspaces" -> store.workspaces(uuid(a, "projectId"));
             case "list_tasks" -> store.tasks(uuid(a, "projectId"));
             case "list_agents" -> store.agents(uuid(a, "projectId"));
             case "list_context" -> coordination.context(uuid(a, "projectId"));
             case "list_resource_intents" -> coordination.intents(uuid(a, "projectId"));
             case "list_inbox" -> coordination.inbox(uuid(a, "workspaceId"));
+            case "connect_agent" -> {
+                UUID workspaceId = store.registerWorkspace(uuid(a, "projectId"), string(a, "workspaceName"),
+                        "remote-mcp", "Remote MCP", string(a, "displayName"));
+                UUID orchestratorId = store.registerOrchestrator(workspaceId, "mcp", "REMOTE_MCP", optionalString(a, "model"));
+                UUID agentId = store.registerAgent(orchestratorId, string(a, "agentKey"), string(a, "agentName"),
+                        optionalString(a, "role"), optionalString(a, "model"));
+                yield "{\"workspaceId\":\"" + workspaceId + "\",\"orchestratorId\":\"" + orchestratorId +
+                        "\",\"agentId\":\"" + agentId + "\"}";
+            }
+            case "heartbeat_agent" -> {
+                store.heartbeatAgentTree(uuid(a, "agentId"));
+                yield "{\"status\":\"ONLINE\"}";
+            }
             case "claim_task" -> {
                 store.claim(uuid(a, "taskId"), uuid(a, "workspaceId"), uuid(a, "agentId"));
                 yield "{\"status\":\"CLAIMED\"}";
+            }
+            case "start_task" -> {
+                store.transitionTask(uuid(a, "taskId"), "CLAIMED", "IN_PROGRESS");
+                yield "{\"status\":\"IN_PROGRESS\"}";
+            }
+            case "complete_task" -> {
+                store.transitionTask(uuid(a, "taskId"), "IN_PROGRESS", "COMPLETED");
+                yield "{\"status\":\"COMPLETED\"}";
             }
             case "announce_resource_intent" -> "{\"id\":\"" + coordination.createIntent(uuid(a, "projectId"), uuid(a, "workspaceId"),
                     uuid(a, "agentId"), optionalUuid(a, "taskId"), string(a, "resourceType"), string(a, "resourcePath"),
@@ -155,6 +186,14 @@ public class McpApi {
                     uuid(a, "fromWorkspaceId"), optionalUuid(a, "fromAgentId"), uuid(a, "toWorkspaceId"),
                     optionalUuid(a, "toAgentId"), optionalUuid(a, "taskId"), string(a, "type"),
                     optionalString(a, "subject"), string(a, "body")));
+            case "read_message" -> {
+                coordination.read(uuid(a, "messageId"));
+                yield "{\"status\":\"READ\"}";
+            }
+            case "ack_message" -> {
+                coordination.acknowledge(uuid(a, "messageId"));
+                yield "{\"status\":\"ACKNOWLEDGED\"}";
+            }
             case "accept_handoff" -> "{\"taskId\":\"" + coordination.acceptHandoff(uuid(a, "messageId")) + "\"}";
             default -> throw new IllegalArgumentException("Unknown tool");
         };

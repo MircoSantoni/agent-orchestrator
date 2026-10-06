@@ -119,6 +119,20 @@ class ControlPlaneTest {
         return request.retrieve().body(Map.class);
     }
 
+    private String mcpText(String user, String name, Map<String, Object> arguments) {
+        Map<?, ?> result = (Map<?, ?>) mcp(user, "tools/call", name, arguments).get("result");
+        assertEquals(false, result.get("isError"));
+        return (String) ((Map<?, ?>) ((List<?>) result.get("content")).getFirst()).get("text");
+    }
+
+    private String jsonField(String json, String field) {
+        String marker = "\"" + field + "\":\"";
+        int start = json.indexOf(marker);
+        assertTrue(start >= 0, "Missing " + field + " in " + json);
+        int valueStart = start + marker.length();
+        return json.substring(valueStart, json.indexOf('"', valueStart));
+    }
+
     @Test
     void officialMcpJavaClientCanDiscoverAndCallTools() {
         var transport = HttpClientStreamableHttpTransport.builder("http://127.0.0.1:" + port)
@@ -162,6 +176,42 @@ class ControlPlaneTest {
                 .header("X-Dev-User", "mirco").retrieve().body(List.class);
         assertTrue(context.stream().map(Map.class::cast).anyMatch(entry ->
                 "Design".equals(entry.get("title")) && "PENDING_APPROVAL".equals(entry.get("status"))));
+    }
+
+    @Test
+    void remoteMcpAgentCanConnectAndWorkWithoutBridge() {
+        assertTrue(mcpText("mirco", "list_projects", Map.of()).contains(projectId));
+        Map<?, ?> outsider = (Map<?, ?>) mcp("outsider", "tools/call", "connect_agent", Map.of(
+                "projectId", projectId, "workspaceName", "remote", "displayName", "Outsider",
+                "agentKey", "audit", "agentName", "Auditor")).get("result");
+        assertEquals(true, outsider.get("isError"));
+
+        Map<String, Object> registration = Map.of("projectId", projectId, "workspaceName", "remote",
+                "displayName", "Mirco", "agentKey", "audit", "agentName", "Auditor");
+        String connected = mcpText("mirco", "connect_agent", registration);
+        String workspace = jsonField(connected, "workspaceId");
+        String agent = jsonField(connected, "agentId");
+        assertEquals(workspace, jsonField(mcpText("mirco", "connect_agent", registration), "workspaceId"));
+        assertTrue(mcpText("mirco", "list_workspaces", Map.of("projectId", projectId)).contains(workspace));
+        mcpText("mirco", "heartbeat_agent", Map.of("agentId", agent));
+        Map<?, ?> unauthorizedHeartbeat = (Map<?, ?>) mcp("juan", "tools/call", "heartbeat_agent",
+                Map.of("agentId", agent)).get("result");
+        assertEquals(true, unauthorizedHeartbeat.get("isError"));
+
+        String task = id(post("mirco", "/projects/" + projectId + "/tasks", Map.of("title", "Remote MCP task")));
+        mcpText("mirco", "claim_task", Map.of("taskId", task, "workspaceId", workspace, "agentId", agent));
+        mcpText("mirco", "start_task", Map.of("taskId", task));
+        assertEquals("IN_PROGRESS", get("mirco", "/tasks/" + task).get("status"));
+        mcpText("mirco", "complete_task", Map.of("taskId", task));
+        assertEquals("COMPLETED", get("mirco", "/tasks/" + task).get("status"));
+
+        String message = mcpText("mirco", "send_message", Map.of("projectId", projectId,
+                "fromWorkspaceId", workspace, "fromAgentId", agent, "toWorkspaceId", juanWorkspace,
+                "type", "COORDINATION_REQUEST", "body", "Buenos días"));
+        String messageId = jsonField(message, "id");
+        assertTrue(mcpText("juan", "list_inbox", Map.of("workspaceId", juanWorkspace)).contains(messageId));
+        mcpText("juan", "read_message", Map.of("messageId", messageId));
+        mcpText("juan", "ack_message", Map.of("messageId", messageId));
     }
 
     @Test

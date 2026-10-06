@@ -173,6 +173,16 @@ public class Store {
     }
 
     @Transactional
+    public void heartbeatAgentTree(UUID id) {
+        ownAgent(id);
+        UUID orchestratorId = uuid("select orchestrator_id from agent where id=?", id);
+        UUID workspaceId = agentWorkspace(id);
+        heartbeatWorkspace(workspaceId);
+        heartbeatOrchestrator(orchestratorId);
+        heartbeatAgent(id);
+    }
+
+    @Transactional
     public void setAgentStatus(UUID id, String status) {
         ownAgent(id);
         if (!List.of("IDLE","BUSY","WAITING","BLOCKED","ERROR").contains(status)) throw ApiProblem.badRequest("Invalid agent status");
@@ -248,6 +258,10 @@ public class Store {
         return many("select row_to_json(x)::text from (select p.* from project p join project_member pm " +
                 "on pm.project_id=p.id where p.organization_id=? and pm.user_sub=? " +
                 "order by p.created_at desc) x", organizationId, user);
+    }
+    public String projects() {
+        return many("select row_to_json(x)::text from (select p.* from project p join project_member pm " +
+                "on pm.project_id=p.id where pm.user_sub=? order by p.created_at desc) x", actor.sub());
     }
     public String members(UUID projectId) {
         member(projectId);
