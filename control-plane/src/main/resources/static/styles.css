@@ -82,6 +82,7 @@ main { max-width: 1450px; margin: 0 auto; padding: var(--space-6) var(--space-6)
 .project-heading { align-items: end; margin-bottom: var(--space-5); }
 .project-heading h2 { font-size: 24px; margin: var(--space-1) 0 0; }
 .project-heading p { display: none; }
+.loading-status { color: var(--muted); font-size: 12px; margin: 0 0 var(--space-4); }
 .section-intro { align-items: end; margin: var(--space-5) 0 var(--space-4); }
 .section-intro h3 { font-size: 18px; margin: var(--space-1) 0 0; }
 .section-intro p { color: var(--muted); font-size: 12px; margin: var(--space-1) 0 0; }
