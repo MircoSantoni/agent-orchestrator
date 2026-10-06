@@ -3,17 +3,17 @@
 La arquitectura se define en dos stacks:
 
 1. `cloudformation/build.yaml`: repositorio ECR y proyecto CodeBuild con acceso al repositorio GitHub mediante una conexión AWS CodeConnections.
-2. `cloudformation/application.yaml`: VPC, dos subredes públicas para ALB/Fargate, dos subredes privadas para RDS PostgreSQL 17, Cognito, certificado ACM, DNS Route 53, ECS Fargate, Secrets Manager, CloudWatch y alerta de presupuesto.
+2. `cloudformation/application.yaml`: VPC, dos subredes públicas para Fargate, dos subredes privadas para ALB y RDS PostgreSQL 17, CloudFront con dominio HTTPS de AWS, Cognito, ECS Fargate, Secrets Manager, CloudWatch y alerta de presupuesto.
 
 `buildspec.yml` construye el Dockerfile con Java 25, publica en ECR y usa los primeros 12 caracteres del commit como etiqueta inmutable. CloudFormation recibe esa etiqueta en `ImageTag`. El despliegue de aplicación se hace con un cambio explícito del stack después de revisar la compilación. Este flujo evita que un push aplique infraestructura o cambie producción sin revisión.
 
-Los Bridges siguen en las PCs. El Security Group de ECS solo acepta tráfico del ALB; RDS solo acepta tráfico de ECS. Las tareas tienen IP pública para salir a servicios AWS sin NAT Gateway, pero el puerto 8080 no queda abierto a Internet. RDS usa una sola instancia, cifrado, backup de siete días y protección contra borrado; no es Multi-AZ. El presupuesto envía una alerta al 80 % y no detiene gastos.
+Los Bridges siguen en las PCs. CloudFront asigna una URL `https://...cloudfront.net` sin registrar dominio propio; conecta por un origen VPC al ALB privado. CloudFront no almacena respuestas de esta API y reenvía métodos, cabeceras, cookies y query strings, necesarios para OAuth, MCP y SSE. El Security Group de ECS solo acepta tráfico del ALB; RDS solo acepta tráfico de ECS. Las tareas tienen IP pública para salir a servicios AWS sin NAT Gateway, pero el puerto 8080 no queda abierto a Internet. RDS usa una sola instancia, cifrado, backup de siete días y protección contra borrado; no es Multi-AZ. El presupuesto envía una alerta al 80 % y no detiene gastos.
 
 ## Datos necesarios en la sesión final
 
-- Cuenta AWS, región y un perfil AWS CLI con permisos de CloudFormation, IAM, CodeBuild, CodeConnections, ECR, ECS, EC2/VPC, ELB, ACM, Route 53, RDS, Cognito, Logs y Budgets.
+- Cuenta AWS, región y un perfil AWS CLI con permisos de CloudFormation, IAM, CodeBuild, CodeConnections, ECR, ECS, EC2/VPC, ELB, CloudFront, RDS, Cognito, Logs y Budgets. CloudFront VPC origins debe estar disponible en la región y en las zonas de disponibilidad elegidas.
 - Repositorio GitHub publicado y conexión CodeConnections autorizada para leerlo. Una conexión creada por CloudFormation queda pendiente hasta autorizarla; por eso el stack de build recibe un ARN ya activo.
-- Dominio con Hosted Zone pública de Route 53 en la cuenta, presupuesto mensual y correo de alerta. La plantilla usa USD 10 como valor inicial del presupuesto; antes de aplicarla hay que comprobar si ya existe un presupuesto para evitar alertas duplicadas.
+- Presupuesto mensual y correo de alerta. La plantilla usa USD 10 como valor inicial; antes de aplicarla hay que comprobar si ya existe un presupuesto para evitar alertas duplicadas. La URL pública aparece en el output `PublicUrl` al crear el stack.
 - Callback URLs de los clientes MCP reales y usuarios para invitar a Cognito.
 - Revisión del coste regional en AWS Pricing Calculator antes de crear los stacks.
 
@@ -51,8 +51,6 @@ aws cloudformation deploy --stack-name agent-orchestrator-app `
   --capabilities CAPABILITY_IAM `
   --parameter-overrides `
     Name=agent-orchestrator `
-    DomainName=<dominio> `
-    HostedZoneId=<zone-id> `
     RepositoryUri=$repository `
     ImageTag=$tag `
     BudgetEmail=<correo> `
@@ -64,7 +62,7 @@ Para la revisión previa, usar `aws cloudformation create-change-set` y `describ
 
 ## Verificación y actualización
 
-Verificar `/actuator/health`, metadatos OAuth en `/.well-known/oauth-protected-resource`, login PKCE del panel y Bridge, permisos por proyecto, un cliente MCP real, logs CloudWatch y SSE/reconexión con dos tareas ECS. La primera creación puede esperar la validación DNS del certificado y el arranque de RDS.
+Verificar `/actuator/health`, metadatos OAuth en `/.well-known/oauth-protected-resource`, login PKCE del panel y Bridge, permisos por proyecto, un cliente MCP real, logs CloudWatch y SSE/reconexión con dos tareas ECS. La primera creación puede esperar el origen VPC/CloudFront y el arranque de RDS. El hostname genérico pertenece a la distribución: si se reemplaza la distribución, habrá que actualizar Cognito y los clientes que usen esa URL.
 
 Para una versión nueva, ejecutar CodeBuild con un commit nuevo, comprobar que la imagen existe en ECR y actualizar `ImageTag` en el stack de aplicación. Para rollback, desplegar el tag anterior. Las migraciones Flyway deben ser compatibles con la versión anterior si se necesita ese rollback. La base de datos tiene backup automático y política Snapshot al eliminar el recurso, pero la restauración es una operación separada.
 

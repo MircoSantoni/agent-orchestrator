@@ -1,15 +1,10 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Agent Orchestrator HTTPS API, Cognito, Fargate, and private PostgreSQL.
+Description: Agent Orchestrator CloudFront HTTPS API, Cognito, Fargate, and private PostgreSQL.
 Parameters:
   Name:
     Type: String
     Default: agent-orchestrator
     AllowedPattern: '[a-z][a-z0-9-]*'
-  DomainName:
-    Type: String
-    Description: Public hostname, for example agents.example.com.
-  HostedZoneId:
-    Type: AWS::Route53::HostedZone::Id
   RepositoryUri:
     Type: String
     Description: RepositoryUri output from the build stack.
@@ -112,17 +107,13 @@ Resources:
   AlbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Public HTTPS and HTTP redirect
+      GroupDescription: HTTP from CloudFront VPC origin inside this VPC
       VpcId: !Ref Vpc
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
+          CidrIp: 10.42.0.0/16
   ServiceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -196,7 +187,7 @@ Resources:
   ApiResourceServer:
     Type: AWS::Cognito::UserPoolResourceServer
     Properties:
-      Identifier: !Sub 'https://${DomainName}'
+      Identifier: !Sub 'https://${Distribution.DomainName}'
       Name: Agent Orchestrator API
       UserPoolId: !Ref UserPool
       Scopes:
@@ -215,9 +206,9 @@ Resources:
         - openid
         - profile
         - email
-        - !Sub 'https://${DomainName}/api'
-      CallbackURLs: [!Sub 'https://${DomainName}/']
-      LogoutURLs: [!Sub 'https://${DomainName}/']
+        - !Sub 'https://${Distribution.DomainName}/api'
+      CallbackURLs: [!Sub 'https://${Distribution.DomainName}/']
+      LogoutURLs: [!Sub 'https://${Distribution.DomainName}/']
       SupportedIdentityProviders: [COGNITO]
       PreventUserExistenceErrors: ENABLED
       AccessTokenValidity: 60
@@ -238,7 +229,7 @@ Resources:
         - openid
         - profile
         - email
-        - !Sub 'https://${DomainName}/api'
+        - !Sub 'https://${Distribution.DomainName}/api'
       CallbackURLs: [!Ref BridgeCallbackUrl]
       SupportedIdentityProviders: [COGNITO]
       PreventUserExistenceErrors: ENABLED
@@ -260,7 +251,7 @@ Resources:
         - openid
         - profile
         - email
-        - !Sub 'https://${DomainName}/api'
+        - !Sub 'https://${Distribution.DomainName}/api'
       CallbackURLs: !Ref McpCallbackUrls
       SupportedIdentityProviders: [COGNITO]
       PreventUserExistenceErrors: ENABLED
@@ -269,21 +260,13 @@ Resources:
       TokenValidityUnits:
         AccessToken: minutes
         RefreshToken: days
-  Certificate:
-    Type: AWS::CertificateManager::Certificate
-    Properties:
-      DomainName: !Ref DomainName
-      ValidationMethod: DNS
-      DomainValidationOptions:
-        - DomainName: !Ref DomainName
-          HostedZoneId: !Ref HostedZoneId
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Scheme: internet-facing
+      Scheme: internal
       Type: application
       SecurityGroups: [!Ref AlbSecurityGroup]
-      Subnets: [!Ref PublicSubnetA, !Ref PublicSubnetB]
+      Subnets: [!Ref DatabaseSubnetA, !Ref DatabaseSubnetB]
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -305,33 +288,39 @@ Resources:
       Port: 80
       Protocol: HTTP
       DefaultActions:
-        - Type: redirect
-          RedirectConfig:
-            Port: '443'
-            Protocol: HTTPS
-            StatusCode: HTTP_301
-  HttpsListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref LoadBalancer
-      Port: 443
-      Protocol: HTTPS
-      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
-      Certificates:
-        - CertificateArn: !Ref Certificate
-      DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref TargetGroup
-  DnsRecord:
-    Type: AWS::Route53::RecordSet
+  VpcOrigin:
+    Type: AWS::CloudFront::VpcOrigin
+    DependsOn: HttpListener
     Properties:
-      HostedZoneId: !Ref HostedZoneId
-      Name: !Ref DomainName
-      Type: A
-      AliasTarget:
-        DNSName: !GetAtt LoadBalancer.DNSName
-        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID
-        EvaluateTargetHealth: true
+      VpcOriginEndpointConfig:
+        Arn: !Ref LoadBalancer
+        Name: !Sub '${Name}-alb'
+        HTTPPort: 80
+        OriginProtocolPolicy: http-only
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+        Origins:
+          - Id: private-alb
+            DomainName: !GetAtt LoadBalancer.DNSName
+            VpcOriginConfig:
+              VpcOriginId: !GetAtt VpcOrigin.Id
+              OriginReadTimeout: 60
+        DefaultCacheBehavior:
+          TargetOriginId: private-alb
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+          CachedMethods: [GET, HEAD]
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
   AppLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -398,11 +387,11 @@ Resources:
             - Name: OIDC_ISSUER_URI
               Value: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
             - Name: PUBLIC_BASE_URL
-              Value: !Sub 'https://${DomainName}'
+              Value: !Sub 'https://${Distribution.DomainName}'
             - Name: API_AUDIENCE
-              Value: !Sub 'https://${DomainName}'
+              Value: !Sub 'https://${Distribution.DomainName}'
             - Name: API_SCOPE
-              Value: !Sub 'https://${DomainName}/api'
+              Value: !Sub 'https://${Distribution.DomainName}/api'
             - Name: COGNITO_DOMAIN
               Value: !Sub 'https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com'
             - Name: HUMAN_CLIENT_ID
@@ -414,8 +403,8 @@ Resources:
             - Name: APP_MCP_ALLOWED_ORIGINS
               Value: !If
                 - HasAdditionalMcpOrigins
-                - !Sub 'https://${DomainName},${AdditionalMcpOrigins}'
-                - !Sub 'https://${DomainName}'
+                - !Sub 'https://${Distribution.DomainName},${AdditionalMcpOrigins}'
+                - !Sub 'https://${Distribution.DomainName}'
           Secrets:
             - Name: DATABASE_PASSWORD
               ValueFrom: !Sub '${Database.MasterUserSecret.SecretArn}:password::'
@@ -427,7 +416,7 @@ Resources:
               awslogs-stream-prefix: control-plane
   Service:
     Type: AWS::ECS::Service
-    DependsOn: HttpsListener
+    DependsOn: HttpListener
     Properties:
       Cluster: !Ref Cluster
       ServiceName: !Ref Name
@@ -469,9 +458,9 @@ Resources:
               Address: !Ref BudgetEmail
 Outputs:
   PublicUrl:
-    Value: !Sub 'https://${DomainName}'
+    Value: !Sub 'https://${Distribution.DomainName}'
   McpUrl:
-    Value: !Sub 'https://${DomainName}/mcp'
+    Value: !Sub 'https://${Distribution.DomainName}/mcp'
   CognitoDomain:
     Value: !Sub 'https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com'
   OidcIssuer:
@@ -485,4 +474,4 @@ Outputs:
   McpClientId:
     Value: !Ref McpClient
   ApiScope:
-    Value: !Sub 'https://${DomainName}/api'
+    Value: !Sub 'https://${Distribution.DomainName}/api'

@@ -53,7 +53,7 @@ En producción, el endpoint anuncia `/.well-known/oauth-protected-resource`; Cog
 
 ## AWS
 
-La topología, variables, bootstrap, despliegue y rollback están documentados en `infra/README.md`. El paso que usa la cuenta AWS personal se hará al final, después de fijar región, dominio/Hosted Zone, correo y presupuesto aceptable, callbacks MCP y perfil de AWS.
+La topología, variables, bootstrap, despliegue y rollback están documentados en `infra/README.md`. CloudFormation crea una URL HTTPS `*.cloudfront.net`, sin dominio propio. El paso que usa la cuenta AWS personal se hará al final, después de fijar región, correo y presupuesto aceptable, callbacks MCP y perfil de AWS.
 
 ## Verificación
 
