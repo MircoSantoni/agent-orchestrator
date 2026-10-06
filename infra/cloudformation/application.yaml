@@ -187,6 +187,7 @@ Resources:
     Properties:
       Domain: !Sub '${Name}-${AWS::AccountId}'
       UserPoolId: !Ref UserPool
+      ManagedLoginVersion: 2
   ApiResourceServer:
     Type: AWS::Cognito::UserPoolResourceServer
     Properties:
@@ -263,6 +264,27 @@ Resources:
       TokenValidityUnits:
         AccessToken: minutes
         RefreshToken: days
+  HumanLoginBranding:
+    Type: AWS::Cognito::ManagedLoginBranding
+    DependsOn: UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientId: !Ref HumanClient
+      UseCognitoProvidedValues: true
+  BridgeLoginBranding:
+    Type: AWS::Cognito::ManagedLoginBranding
+    DependsOn: UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientId: !Ref BridgeClient
+      UseCognitoProvidedValues: true
+  McpLoginBranding:
+    Type: AWS::Cognito::ManagedLoginBranding
+    DependsOn: UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientId: !Ref McpClient
+      UseCognitoProvidedValues: true
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:

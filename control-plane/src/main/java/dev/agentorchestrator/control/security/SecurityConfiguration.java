@@ -7,6 +7,9 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.beans.factory.annotation.Value;
+import java.util.Arrays;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 @Configuration
 public class SecurityConfiguration {
@@ -16,7 +19,7 @@ public class SecurityConfiguration {
             @Value("${app.security.public-base-url:}") String publicBaseUrl,
             @Value("${app.security.required-scope:agent-orchestrator/api}") String requiredScope,
             @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuer) throws Exception {
-        return http.csrf(csrf -> csrf.disable())
+        return http.csrf(csrf -> csrf.disable()).cors(Customizer.withDefaults())
                 .authorizeHttpRequests(auth -> auth.requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/", "/index.html", "/app.js", "/public/config",
                                 "/.well-known/oauth-protected-resource").permitAll()
@@ -33,6 +36,20 @@ public class SecurityConfiguration {
                                 builder.resource(publicBaseUrl).authorizationServer(issuer).scope(requiredScope)
                                         .tlsClientCertificateBoundAccessTokens(false))))
                 .build();
+    }
+
+    @Bean
+    @Profile("!dev")
+    UrlBasedCorsConfigurationSource corsConfigurationSource(@Value("${app.mcp.allowed-origins:}") String allowedOrigins) {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(allowedOrigins.isBlank() ? java.util.List.of() :
+                Arrays.stream(allowedOrigins.split(",")).map(String::trim).filter(s -> !s.isBlank()).toList());
+        config.setAllowedMethods(java.util.List.of("POST", "OPTIONS"));
+        config.setAllowedHeaders(java.util.List.of("Authorization", "Content-Type", "MCP-Protocol-Version", "Mcp-Method", "Mcp-Name", "Accept"));
+        config.setExposedHeaders(java.util.List.of("WWW-Authenticate", "MCP-Protocol-Version"));
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/mcp", config);
+        return source;
     }
 
     @Bean

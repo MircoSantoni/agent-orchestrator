@@ -47,7 +47,7 @@ public class Actor {
         if (clientId == null || clientId.isBlank() || (!clientId.equals(humanClientId) && !clientId.equals(bridgeClientId)
                 && !clientId.equals(mcpClientId)))
             throw ApiProblem.forbidden("Token was issued to another client");
-        if (audience.isBlank() || !jwt.getAudience().contains(audience))
+        if (audience.isBlank() || jwt.getAudience() == null || !jwt.getAudience().contains(audience))
             throw ApiProblem.forbidden("Token audience does not match this API");
         String scopes = jwt.getClaimAsString("scope");
         if (requiredScope.isBlank() || scopes == null || !java.util.Arrays.asList(scopes.split(" ")).contains(requiredScope))

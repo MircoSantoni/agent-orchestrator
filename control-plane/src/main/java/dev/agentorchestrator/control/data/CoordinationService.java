@@ -52,7 +52,11 @@ public class CoordinationService {
         store.ownWorkspace(workspaceId);
         if (!store.workspaceProject(workspaceId).equals(projectId) || !store.agentWorkspace(agentId).equals(workspaceId))
             throw ApiProblem.forbidden("Agent does not belong to workspace or project");
-        if (taskId != null && !store.taskProject(taskId).equals(projectId)) throw ApiProblem.badRequest("Task is in another project");
+        if (taskId != null) {
+            if (!store.taskProject(taskId).equals(projectId)) throw ApiProblem.badRequest("Task is in another project");
+            Integer owned = db.queryForObject("select count(*) from task where id=? and owner_workspace_id=? and executor_agent_id=? and status in ('CLAIMED','IN_PROGRESS','BLOCKED')", Integer.class, taskId, workspaceId, agentId);
+            if (owned == null || owned != 1) throw ApiProblem.forbidden("Agent does not own this active task");
+        }
         if (!List.of("FILE","DIRECTORY","MODULE","SERVICE","REPOSITORY").contains(resourceType)
                 || !List.of("READ","WRITE").contains(intentType) || leaseSeconds < 30 || leaseSeconds > 3600)
             throw ApiProblem.badRequest("Invalid resource intent");
@@ -174,6 +178,11 @@ public class CoordinationService {
         if (!List.of("HELP_REQUEST","CONFLICT_WARNING","TASK_HANDOFF","REVIEW_REQUEST","DISCOVERY","BLOCKER","ARTIFACT_READY","TASK_COMPLETED","COORDINATION_REQUEST").contains(type))
             throw ApiProblem.badRequest("Invalid message type");
         if (type.equals("TASK_HANDOFF") && taskId == null) throw ApiProblem.badRequest("Handoff requires a parent task");
+        if (type.equals("TASK_HANDOFF")) {
+            Integer owned = db.queryForObject("select count(*) from task where id=? and owner_workspace_id=? and (?::uuid is null or executor_agent_id=?)", Integer.class,
+                    taskId, fromWorkspaceId, fromAgentId, fromAgentId);
+            if (owned == null || owned != 1) throw ApiProblem.forbidden("Sender does not own the parent task");
+        }
         UUID id = id("insert into agent_message(project_id,from_workspace_id,from_agent_id,to_workspace_id,to_agent_id,type,task_id,subject,body) values(?,?,?,?,?,?,?,?,?) returning id",
                 projectId, fromWorkspaceId, fromAgentId, toWorkspaceId, toAgentId, type, taskId, subject, body);
         store.activity(projectId, fromWorkspaceId, fromAgentId, taskId, "MESSAGE_CREATED", type + " sent", id);

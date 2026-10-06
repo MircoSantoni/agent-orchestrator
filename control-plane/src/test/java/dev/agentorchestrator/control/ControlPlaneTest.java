@@ -3,6 +3,7 @@ package dev.agentorchestrator.control;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.List;
 import java.util.Map;
@@ -186,6 +187,30 @@ class ControlPlaneTest {
         }
     }
 
+    @Test
+    void agentCannotClaimSecondTaskAndClaimedTaskCannotGainDependencies() {
+        String first = id(post("mirco", "/projects/" + projectId + "/tasks", Map.of("title", "First")));
+        String second = id(post("mirco", "/projects/" + projectId + "/tasks", Map.of("title", "Second")));
+        post("mirco", "/tasks/" + first + "/claim", Map.of("workspaceId", mircoWorkspace, "agentId", mircoAgent));
+        assertEquals(409, assertThrows(RestClientResponseException.class, () ->
+                post("mirco", "/tasks/" + second + "/claim", Map.of("workspaceId", mircoWorkspace, "agentId", mircoAgent)))
+                .getStatusCode().value());
+        assertEquals("READY", get("mirco", "/tasks/" + second).get("status"));
+        assertEquals(409, assertThrows(RestClientResponseException.class, () ->
+                post("mirco", "/tasks/" + first + "/dependencies", Map.of("dependsOnTaskId", second)))
+                .getStatusCode().value());
+    }
+
+    @Test
+    void handoffRequiresOwnershipOfParentTask() {
+        String parent = id(post("mirco", "/projects/" + projectId + "/tasks", Map.of("title", "Parent")));
+        assertEquals(403, assertThrows(RestClientResponseException.class, () ->
+                post("juan", "/projects/" + projectId + "/messages", Map.of(
+                        "fromWorkspaceId", juanWorkspace, "toWorkspaceId", mircoWorkspace,
+                        "taskId", parent, "type", "TASK_HANDOFF", "body", "Take this")))
+                .getStatusCode().value());
+    }
+
     private int claimAfter(CountDownLatch start, String user, String task, String workspace, String agent) throws Exception {
         start.await();
         try {
@@ -235,6 +260,7 @@ class ControlPlaneTest {
     @Test
     void proposalNeedsHumanApprovalAndHandoffCreatesChildTask() {
         String parent = id(post("mirco", "/projects/" + projectId + "/tasks", Map.of("title", "Backend")));
+        post("mirco", "/tasks/" + parent + "/claim", Map.of("workspaceId", mircoWorkspace, "agentId", mircoAgent));
         String proposal = id(post("mirco", "/projects/" + projectId + "/context",
                 Map.of("type", "PROPOSAL", "title", "JWT location", "content", "Use gateway", "workspaceId", mircoWorkspace)));
         List<?> entries = client.get().uri("/api/v1/projects/" + projectId + "/context")

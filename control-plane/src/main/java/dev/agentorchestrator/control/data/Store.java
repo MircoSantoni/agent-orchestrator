@@ -61,6 +61,8 @@ public class Store {
     public UUID taskProject(UUID taskId) { return uuid("select project_id from task where id=?", taskId); }
 
     public void activity(UUID projectId, UUID workspaceId, UUID agentId, UUID taskId, String type, String summary, UUID entityId) {
+        // Serialize event IDs within a project through commit, so SSE cursors cannot skip a late commit.
+        db.queryForObject("select id from project where id=? for update", UUID.class, projectId);
         db.update("insert into activity_event(project_id,workspace_id,agent_id,task_id,type,summary,payload) values(?,?,?,?,?,?,jsonb_build_object('entityId',?::text))",
                 projectId, workspaceId, agentId, taskId, type, summary, entityId.toString());
     }
@@ -68,13 +70,16 @@ public class Store {
     @Transactional
     public UUID createOrganization(String name, String slug) {
         actor.requireHuman();
-        return organizations.saveAndFlush(new OrganizationEntity(name, slug)).id;
+        OrganizationEntity organization = organizations.saveAndFlush(new OrganizationEntity(name, slug));
+        db.update("update organization set owner_sub=? where id=?", actor.sub(), organization.id);
+        return organization.id;
     }
 
     @Transactional
     public UUID createProject(UUID organizationId, String name, String slug) {
         actor.requireHuman();
-        if (!organizations.existsById(organizationId)) throw ApiProblem.notFound("Organization not found");
+        String owner = one("select owner_sub from organization where id=?", organizationId);
+        if (!actor.sub().equals(owner)) throw ApiProblem.forbidden("Only the organization owner can create projects");
         UUID id = projects.saveAndFlush(new ProjectEntity(organizationId, name, slug)).id;
         db.update("insert into project_member(project_id,user_sub,display_name,role) values(?,?,?,'ADMIN')", id, actor.sub(), actor.sub());
         return id;
@@ -164,6 +169,8 @@ public class Store {
     public void addDependency(UUID taskId, UUID dependencyId) {
         UUID projectId = taskProject(taskId);
         member(projectId);
+        String status = one("select status from task where id=? for update", taskId);
+        if (!status.equals("READY") && !status.equals("BACKLOG")) throw ApiProblem.conflict("Dependencies cannot change after a task is claimed");
         if (!taskProject(dependencyId).equals(projectId)) throw ApiProblem.badRequest("Dependency is in another project");
         Integer cycle = db.queryForObject("with recursive chain(id) as (select depends_on_task_id from task_dependency where task_id=? union select d.depends_on_task_id from task_dependency d join chain c on d.task_id=c.id) select count(*) from chain where id=?", Integer.class, dependencyId, taskId);
         if (taskId.equals(dependencyId) || (cycle != null && cycle > 0)) throw ApiProblem.conflict("Dependency cycle");
@@ -175,11 +182,12 @@ public class Store {
         UUID projectId = taskProject(taskId);
         ownWorkspace(workspaceId);
         if (!workspaceProject(workspaceId).equals(projectId) || !agentWorkspace(agentId).equals(workspaceId)) throw ApiProblem.forbidden("Agent or workspace is outside task project");
+        int agentChanged = db.update("update agent set current_task_id=?,status='BUSY',updated_at=now() where id=? and current_task_id is null", taskId, agentId);
+        if (agentChanged != 1) throw ApiProblem.conflict("Agent already has a task");
         int changed = db.update("update task set status='CLAIMED',owner_workspace_id=?,executor_agent_id=?,updated_at=now() " +
                 "where id=? and status='READY' and (owner_workspace_id is null or owner_workspace_id=?) and not exists(select 1 from task_dependency d join task prerequisite on prerequisite.id=d.depends_on_task_id where d.task_id=? and prerequisite.status<>'COMPLETED')",
                 workspaceId, agentId, taskId, workspaceId, taskId);
         if (changed != 1) throw ApiProblem.conflict("Task is unavailable or dependencies are incomplete");
-        db.update("update agent set current_task_id=?,status='BUSY',updated_at=now() where id=?", taskId, agentId);
         activity(projectId, workspaceId, agentId, taskId, "TASK_CLAIMED", "Task claimed", taskId);
     }
 
@@ -197,7 +205,11 @@ public class Store {
         activity(projectId, owner, agentId, taskId, "TASK_" + target, "Task " + target.toLowerCase(), taskId);
     }
 
-    public String organization(UUID id) { return one("select row_to_json(x)::text from (select * from organization where id=?) x", id); }
+    public String organization(UUID id) {
+        Integer visible = db.queryForObject("select count(*) from organization o where o.id=? and (o.owner_sub=? or exists(select 1 from project p join project_member pm on pm.project_id=p.id where p.organization_id=o.id and pm.user_sub=?))", Integer.class, id, actor.sub(), actor.sub());
+        if (visible == null || visible == 0) throw ApiProblem.forbidden("Not an organization member");
+        return one("select row_to_json(x)::text from (select * from organization where id=?) x", id);
+    }
     public String project(UUID id) { member(id); return one("select row_to_json(x)::text from (select * from project where id=?) x", id); }
     public String workspace(UUID id) { member(workspaceProject(id)); return one("select row_to_json(x)::text from (select * from workspace where id=?) x", id); }
     public String orchestrator(UUID id) { UUID wid = uuid("select workspace_id from orchestrator where id=?", id); member(workspaceProject(wid)); return one("select row_to_json(x)::text from (select * from orchestrator where id=?) x", id); }
