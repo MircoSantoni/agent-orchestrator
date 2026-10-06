@@ -45,7 +45,7 @@ Para el servicio remoto, configurá `CONTROL_PLANE_URL` con la URL HTTPS y estas
 
 ## Identidad y aprobación
 
-En producción, Spring valida la firma JWT mediante el JWKS del issuer OIDC, emisor, vigencia, `token_use=access`, cliente autorizado, audience y scope. Cada operación comprueba membresía y ownership en PostgreSQL. Solo el cliente humano puede aprobar o rechazar propuestas. El panel usa un cliente público Cognito con PKCE; permite ver propuestas pendientes y decidirlas. Al cerrar o recargar la pestaña, los tokens en memoria se pierden y se inicia sesión de nuevo.
+En producción, Spring valida la firma JWT mediante el JWKS del issuer OIDC, emisor, vigencia, `token_use=access`, cliente autorizado, audience y scope. Cada operación comprueba membresía y ownership en PostgreSQL. Solo el cliente humano puede aprobar o rechazar propuestas. El panel usa un cliente público Cognito con PKCE; permite ver propuestas pendientes y decidirlas. Los administradores de proyecto pueden invitar miembros por correo; el servidor crea la cuenta Cognito si todavía no existe y guarda el identificador interno. Al cerrar o recargar la pestaña, los tokens en memoria se pierden y se inicia sesión de nuevo.
 
 ## MCP remoto
 

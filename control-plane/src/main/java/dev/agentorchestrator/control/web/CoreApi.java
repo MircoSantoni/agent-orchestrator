@@ -1,7 +1,9 @@
 package dev.agentorchestrator.control.web;
 
 import dev.agentorchestrator.control.data.Store;
+import dev.agentorchestrator.control.identity.InvitationService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.util.Map;
@@ -20,11 +22,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1")
 public class CoreApi {
     private final Store store;
-    public CoreApi(Store store) { this.store = store; }
+    private final InvitationService invitations;
+    public CoreApi(Store store, InvitationService invitations) { this.store = store; this.invitations = invitations; }
 
     public record OrganizationInput(@NotBlank String name, @NotBlank String slug) {}
     public record ProjectInput(@NotBlank String name, @NotBlank String slug) {}
-    public record MemberInput(@NotBlank String userSub, @NotBlank String displayName) {}
+    public record InvitationInput(@NotBlank @Email String email, @NotBlank String displayName) {}
+    public record ResendInput(@NotBlank @Email String email) {}
     public record WorkspaceInput(@NotBlank String name, @NotBlank String hostname, String os, @NotBlank String ownerDisplayName) {}
     public record OrchestratorInput(@NotBlank String name, @NotBlank String type, String model) {}
     public record AgentInput(@NotBlank String externalId, @NotBlank String name, String role, String model) {}
@@ -41,6 +45,9 @@ public class CoreApi {
     @GetMapping(value="/me", produces=MediaType.APPLICATION_JSON_VALUE)
     public Map<String, String> me() { return Map.of("sub", store.currentUser()); }
 
+    @PostMapping("/me/activate")
+    public Map<String, String> activate() { store.markCurrentUserActive(); return Map.of("status", "ACTIVE"); }
+
     @GetMapping(value="/organizations", produces=MediaType.APPLICATION_JSON_VALUE)
     public String organizations() { return store.organizations(); }
 
@@ -55,13 +62,18 @@ public class CoreApi {
     @GetMapping(value="/projects/{projectId}", produces=MediaType.APPLICATION_JSON_VALUE)
     public String project(@PathVariable UUID projectId) { return store.project(projectId); }
 
-    @PostMapping("/projects/{projectId}/members")
-    public Map<String, String> member(@PathVariable UUID projectId, @Valid @RequestBody MemberInput input) {
-        store.addMember(projectId, input.userSub(), input.displayName()); return Map.of("status", "ADDED");
-    }
-
     @GetMapping(value="/projects/{projectId}/members", produces=MediaType.APPLICATION_JSON_VALUE)
     public String members(@PathVariable UUID projectId) { return store.members(projectId); }
+
+    @PostMapping("/projects/{projectId}/invitations")
+    public Map<String, String> invite(@PathVariable UUID projectId, @Valid @RequestBody InvitationInput input) {
+        return invitations.invite(projectId, input.email(), input.displayName());
+    }
+
+    @PostMapping("/projects/{projectId}/invitations/resend")
+    public Map<String, String> resend(@PathVariable UUID projectId, @Valid @RequestBody ResendInput input) {
+        return invitations.resend(projectId, input.email());
+    }
 
     @PostMapping(value="/projects/{projectId}/workspaces", produces=MediaType.APPLICATION_JSON_VALUE)
     public String workspace(@PathVariable UUID projectId, @Valid @RequestBody WorkspaceInput input) {

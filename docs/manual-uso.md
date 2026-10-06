@@ -15,13 +15,13 @@ El Bridge registra y coordina agentes simulados; **no ejecuta un modelo ni lee a
 - MCP: `https://d3tlsuzwwbes8y.cloudfront.net/mcp`
 - Región AWS: `us-east-1`; stack: `agent-orchestrator-app`.
 
-El pool Cognito `us-east-1_m0WBZIIFO` permite únicamente usuarios creados por un administrador de AWS en **Amazon Cognito → User pools → us-east-1_m0WBZIIFO → Users → Create user**. La contraseña temporal se entrega por un canal seguro y Cognito pide cambiarla al primer ingreso. Un usuario de Cognito no obtiene acceso a un proyecto ajeno hasta que el administrador del proyecto lo agregue como miembro.
+El pool Cognito `us-east-1_m0WBZIIFO` permite altas administrativas. Un administrador del proyecto puede invitar a una persona por correo desde el panel: el servidor crea la cuenta en Cognito si hace falta y solicita el envío de la invitación. Cognito pide cambiar la contraseña temporal al primer ingreso. La invitación solo agrega acceso al proyecto elegido.
 
 El panel usa el botón **Ingresar** y abre el inicio de sesión de Cognito. La autenticación usa Authorization Code + PKCE. Si se recarga la pestaña hay que iniciar sesión otra vez, porque los tokens se guardan solo en memoria.
 
 ## 3. Preparar el primer proyecto
 
-Desde el panel, entrá con Cognito, pulsá **Crear organización**, ingresá nombre e identificador, y después pulsá **Crear proyecto**. El proyecto aparece automáticamente en el selector lateral; quien lo creó queda como administrador. En **Equipo y agentes** podés agregar miembros usando su `sub` de Cognito, que cada persona puede copiar desde esa misma vista. La cuenta del miembro debe existir previamente en Cognito.
+Desde el panel, entrá con Cognito, pulsá **Crear organización**, ingresá nombre e identificador, y después pulsá **Crear proyecto**. El proyecto aparece automáticamente en el selector lateral; quien lo creó queda como administrador. En **Equipo y agentes**, pulsá **Invitar miembro** e ingresá correo y nombre visible. La persona puede no tener cuenta todavía: el servidor la crea en Cognito y la incorpora al proyecto. Si la cuenta ya existe, se utiliza esa identidad. El panel muestra **Invitación pendiente** hasta que la persona inicia sesión; el administrador puede pulsar **Reenviar invitación**.
 
 La API REST sigue disponible para automatización. Para llamarla se necesita un **access token del cliente humano** de Cognito con scope `https://d3tlsuzwwbes8y.cloudfront.net/api`. El token del Bridge o del cliente MCP no habilita la creación de organizaciones ni la incorporación de miembros. Para una prueba manual, iniciá sesión en el panel y, en las herramientas de desarrollador de **tu propio navegador**, buscá en **Network** la respuesta a `oauth2/token`. Copiá `access_token` y usalo temporalmente en la terminal. No copies `id_token`, no publiques el token y no lo guardes en el repositorio.
 
@@ -43,16 +43,16 @@ $project = Invoke-RestMethod -Method Post -Uri "$api/organizations/$($org.id)/pr
 $project.id
 ```
 
-Guardá el `project.id` (UUID). La persona que crea el proyecto queda como administradora del proyecto. Para sumar a otra persona, primero debe existir en Cognito; luego agregala con su identificador `sub` de Cognito, **no con su correo**:
+Guardá el `project.id` (UUID). La persona que crea el proyecto queda como administradora del proyecto. Para invitar a otra persona por correo:
 
 ```powershell
-$memberSub = '<sub_del_usuario_en_cognito>'
-Invoke-RestMethod -Method Post -Uri "$api/projects/$($project.id)/members" -Headers $headers `
+$memberEmail = 'felipe@empresa.com'
+Invoke-RestMethod -Method Post -Uri "$api/projects/$($project.id)/invitations" -Headers $headers `
   -ContentType 'application/json; charset=utf-8' `
-  -Body (@{ userSub = $memberSub; displayName = 'Felipe' } | ConvertTo-Json)
+  -Body (@{ email = $memberEmail; displayName = 'Felipe' } | ConvertTo-Json)
 ```
 
-El `sub` se ve en los atributos del usuario en Cognito. En la API, solo un miembro con rol `ADMIN` puede agregar miembros. El creador de la organización es quien puede crear proyectos dentro de ella.
+La respuesta indica `INVITED` si se solicitó un correo nuevo, `RESENT` si se reenvió la invitación de una cuenta pendiente, o `ADDED` si la cuenta ya estaba activa. Cognito acepta la solicitud de envío, pero el sistema no confirma la entrega al buzón. Si no llega, comprobá spam y usá **Reenviar invitación**; para automatizarlo, enviá `POST` a `/projects/{projectId}/invitations/resend` con `{"email":"felipe@empresa.com"}`. Solo un miembro con rol `ADMIN` puede invitar o reenviar. El creador de la organización es quien puede crear proyectos dentro de ella.
 
 ## 4. Usar el panel web
 
@@ -60,7 +60,7 @@ El `sub` se ve en los atributos del usuario en Cognito. En la API, solo un miemb
 2. **Resumen** muestra métricas, workspaces conectados por mensajes, tareas, actividad y propuestas pendientes.
 3. **Tareas** permite crear tareas y subtareas. **Comunicación** muestra el tráfico entre workspaces y tu inbox. Para escribir desde el panel, pulsá **Conectar espacio web para enviar** si todavía no tenés un workspace propio.
 4. **Contexto** permite publicar hechos, descubrimientos, suposiciones y propuestas. En una propuesta pendiente, usá **Aprobar** o **Rechazar**. Aprobar crea una entrada `DECISION`.
-5. **Equipo y agentes** muestra miembros, workspaces y agentes, y permite agregar un miembro por su `sub`. **Arquitectura** explica el camino Panel/Bridge/MCP → CloudFront → Control Plane → PostgreSQL y el papel de Cognito/SSE.
+5. **Equipo y agentes** muestra miembros, invitaciones pendientes, workspaces y agentes. Permite invitar por correo y reenviar una invitación pendiente. **Arquitectura** explica el camino Panel/Bridge/MCP → CloudFront → Control Plane → PostgreSQL y el papel de Cognito/SSE.
 
 El panel recuerda el proyecto seleccionado en ese navegador, pero no la sesión. Solo muestra proyectos de los que sos miembro. Los datos se actualizan cada 15 segundos mientras la pestaña está visible. Cualquier miembro humano del proyecto puede aprobar o rechazar propuestas en este MVP.
 
@@ -172,7 +172,7 @@ El cliente MCP debe usar una cuenta Cognito que sea miembro del proyecto. Las he
 
 | Síntoma | Qué revisar |
 | --- | --- |
-| No puedo ingresar | Debe existir el usuario en Cognito y completarse el cambio de contraseña temporal. |
+| No puedo ingresar | Pedí una invitación al administrador del proyecto y completá el cambio de contraseña temporal de Cognito. Si no llegó el correo, comprobá spam y pedí un reenvío. |
 | `401` en la API | Usar el **access token** vigente, no el ID token; iniciar sesión otra vez si venció. |
 | `403` o proyecto vacío | Confirmar membresía por `sub`, proyecto seleccionado y propiedad del workspace para operaciones locales. |
 | `409` al reclamar | La tarea ya tiene dueño, el agente ya tiene una tarea activa o falta completar una dependencia. |

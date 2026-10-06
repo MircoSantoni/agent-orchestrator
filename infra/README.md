@@ -15,7 +15,7 @@ Los Bridges siguen en las PCs. CloudFront asigna una URL `https://...cloudfront.
 - ID regional de la prefix list administrada `com.amazonaws.global.cloudfront.origin-facing` para permitir que CloudFront llegue al ALB privado.
 - Para pasar al modo GitHub: repositorio publicado y conexión CodeConnections autorizada para leerlo. Una conexión creada por CloudFormation queda pendiente hasta autorizarla; por eso `build.yaml` recibe un ARN ya activo.
 - Presupuesto mensual y correo de alerta. La plantilla usa USD 10 como valor inicial; antes de aplicarla hay que comprobar si ya existe un presupuesto para evitar alertas duplicadas. La URL pública aparece en el output `PublicUrl` al crear el stack.
-- Callback URLs de los clientes MCP reales y usuarios para invitar a Cognito.
+- Callback URLs de los clientes MCP reales. Los administradores de proyecto invitan a otras personas por correo desde el panel.
 - Revisión del coste regional en AWS Pricing Calculator antes de crear los stacks.
 
 ## Orden de creación
@@ -75,7 +75,7 @@ aws cloudformation deploy --stack-name agent-orchestrator-app `
     McpCallbackUrls=<callback-1>,<callback-2>
 ```
 
-Para la revisión previa, usar `aws cloudformation create-change-set` y `describe-change-set` con los mismos parámetros antes de ejecutar `deploy`. Crear usuarios mediante la consola/CLI de Cognito; el user pool solo permite alta administrativa.
+Para la revisión previa, usar `aws cloudformation create-change-set` y `describe-change-set` con los mismos parámetros antes de ejecutar `deploy`. El user pool solo permite alta administrativa; el panel invoca `AdminGetUser` y `AdminCreateUser` a través del rol de tarea ECS, limitado al ARN de ese pool, para invitar por correo a miembros de un proyecto.
 
 ## Verificación y actualización
 
@@ -91,5 +91,5 @@ La validación local con `cfn-lint` confirma sintaxis y tipos de recursos. La pl
 - URL pública: `https://d3tlsuzwwbes8y.cloudfront.net`; MCP: `https://d3tlsuzwwbes8y.cloudfront.net/mcp`.
 - La imagen de aplicación activa se publicó en ECR con tag `8546bedc728e` (panel de proyectos y comunicación).
 - Build desde ZIP privado de S3. El repositorio está en GitHub; CodeConnections sigue pendiente de vincular si se desea que los builds se inicien desde commits remotos.
-- El pool Cognito solo permite usuarios creados por administración. Se crearon las primeras cuentas en octubre de 2026; las callback URLs de clientes MCP reales aún deben configurarse según el cliente elegido.
+- El pool Cognito solo permite usuarios creados por administración. Las primeras cuentas se crearon en octubre de 2026; desde esta versión, los administradores de proyecto pueden invitar por correo desde el panel. Las callback URLs de clientes MCP reales aún deben configurarse según el cliente elegido.
 - El stack usa la prefix list `pl-3b927c52` para permitir tráfico de CloudFront al ALB privado. Sin esa regla, las solicitudes públicas quedan esperando hasta timeout.

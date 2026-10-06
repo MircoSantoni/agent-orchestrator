@@ -384,6 +384,16 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invite-project-members
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:AdminCreateUser
+                Resource: !GetAtt UserPool.Arn
   Cluster:
     Type: AWS::ECS::Cluster
     Properties:
@@ -422,6 +432,10 @@ Resources:
               Value: !Sub 'https://${Distribution.DomainName}/api'
             - Name: COGNITO_DOMAIN
               Value: !Sub 'https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com'
+            - Name: COGNITO_USER_POOL_ID
+              Value: !Ref UserPool
+            - Name: APP_AWS_REGION
+              Value: !Ref AWS::Region
             - Name: HUMAN_CLIENT_ID
               Value: !Ref HumanClient
             - Name: BRIDGE_CLIENT_ID

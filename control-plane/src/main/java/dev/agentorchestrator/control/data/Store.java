@@ -23,6 +23,11 @@ public class Store {
 
     public String currentUser() { return actor.sub(); }
 
+    @Transactional
+    public void markCurrentUserActive() {
+        db.update("update project_member set invitation_status='ACTIVE' where user_sub=? and invitation_status='INVITED'", actor.sub());
+    }
+
     public String one(String sql, Object... args) {
         try { return db.queryForObject(sql, String.class, args); }
         catch (EmptyResultDataAccessException e) { throw ApiProblem.notFound("Resource not found"); }
@@ -87,15 +92,34 @@ public class Store {
         return id;
     }
 
-    @Transactional
-    public void addMember(UUID projectId, String userSub, String displayName) {
+    public void requireAdmin(UUID projectId) {
         actor.requireHuman();
         member(projectId);
         String role = one("select role from project_member where project_id=? and user_sub=?", projectId, actor.sub());
         if (!role.equals("ADMIN")) throw ApiProblem.forbidden("Only project admins can add members");
-        db.update("insert into project_member(project_id,user_sub,display_name) values(?,?,?) on conflict(project_id,user_sub) do update set display_name=excluded.display_name",
-                projectId, userSub, displayName);
+    }
+
+    @Transactional
+    public void addMember(UUID projectId, String userSub, String displayName, String email, String invitationStatus) {
+        requireAdmin(projectId);
+        db.update("insert into project_member(project_id,user_sub,display_name,email,invitation_status) values(?,?,?,?,?) " +
+                "on conflict(project_id,user_sub) do update set display_name=excluded.display_name," +
+                "email=coalesce(excluded.email,project_member.email)," +
+                "invitation_status=case when excluded.email is null then project_member.invitation_status else excluded.invitation_status end",
+                projectId, userSub, displayName, email, invitationStatus);
         activity(projectId, null, null, null, "PROJECT_MEMBER_ADDED", "Project member added", projectId);
+    }
+
+    public boolean invitedMemberEmail(UUID projectId, String email) {
+        Integer count = db.queryForObject("select count(*) from project_member where project_id=? and lower(email)=? " +
+                "and invitation_status='INVITED'", Integer.class, projectId, email);
+        return count != null && count > 0;
+    }
+
+    @Transactional
+    public void markMemberEmailActive(UUID projectId, String email) {
+        db.update("update project_member set invitation_status='ACTIVE' where project_id=? and lower(email)=?",
+                projectId, email);
     }
 
     @Transactional
@@ -227,7 +251,7 @@ public class Store {
     }
     public String members(UUID projectId) {
         member(projectId);
-        return many("select row_to_json(x)::text from (select user_sub,display_name,role,created_at " +
+        return many("select row_to_json(x)::text from (select user_sub,display_name,email,invitation_status,role,created_at " +
                 "from project_member where project_id=? order by created_at) x", projectId);
     }
     public String orchestrators(UUID projectId) {

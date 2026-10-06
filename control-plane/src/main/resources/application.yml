@@ -18,6 +18,9 @@ server:
   port: ${PORT:8080}
   forward-headers-strategy: framework
 app:
+  identity:
+    user-pool-id: ${COGNITO_USER_POOL_ID:}
+    region: ${APP_AWS_REGION:us-east-1}
   security:
     public-base-url: ${PUBLIC_BASE_URL:}
     cognito-domain: ${COGNITO_DOMAIN:}

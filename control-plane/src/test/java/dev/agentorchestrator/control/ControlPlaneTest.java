@@ -4,9 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -32,12 +37,14 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import dev.agentorchestrator.control.events.MaintenanceJobs;
+import dev.agentorchestrator.control.identity.UserDirectory;
 
 @Testcontainers
 @ActiveProfiles("dev")
@@ -57,6 +64,7 @@ class ControlPlaneTest {
     @Value("${local.server.port}") int port;
     @Autowired JdbcTemplate db;
     @Autowired MaintenanceJobs jobs;
+    @MockitoBean UserDirectory users;
     RestClient client;
     String projectId;
     String mircoWorkspace;
@@ -70,7 +78,11 @@ class ControlPlaneTest {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         String org = id(post("mirco", "/organizations", Map.of("name", "Test", "slug", "org-" + suffix)));
         projectId = id(post("mirco", "/organizations/" + org + "/projects", Map.of("name", "Test", "slug", "project-" + suffix)));
-        post("mirco", "/projects/" + projectId + "/members", Map.of("userSub", "juan", "displayName", "Juan"));
+        when(users.findByEmail("juan@example.com"))
+                .thenReturn(Optional.of(new UserDirectory.User("juan", "juan@example.com", true)));
+        post("mirco", "/projects/" + projectId + "/invitations",
+                Map.of("email", "juan@example.com", "displayName", "Juan"));
+        reset(users);
         mircoWorkspace = id(post("mirco", "/projects/" + projectId + "/workspaces", workspace("mirco")));
         juanWorkspace = id(post("juan", "/projects/" + projectId + "/workspaces", workspace("juan")));
         String mo = id(post("mirco", "/workspaces/" + mircoWorkspace + "/orchestrators", Map.of("name", "sim", "type", "SIMULATED")));
@@ -238,6 +250,36 @@ class ControlPlaneTest {
         assertEquals(403, assertThrows(RestClientResponseException.class, () ->
                 client.get().uri("/api/v1/workspaces/" + juanWorkspace + "/messages")
                         .header("X-Dev-User", "mirco").retrieve().body(List.class)).getStatusCode().value());
+    }
+
+    @Test
+    void adminCanInviteByEmailWithoutKnowingCognitoIdAndMemberCanActivate() {
+        String email = "new.person@example.com";
+        assertEquals(403, assertThrows(RestClientResponseException.class, () ->
+                post("juan", "/projects/" + projectId + "/invitations", Map.of(
+                        "email", email, "displayName", "New Person"))).getStatusCode().value());
+        verifyNoInteractions(users);
+
+        when(users.findByEmail(email)).thenReturn(Optional.empty());
+        when(users.createAndInvite(email)).thenReturn(new UserDirectory.User("new-person-sub", email, false));
+        Map<?, ?> result = post("mirco", "/projects/" + projectId + "/invitations", Map.of(
+                "email", "New.Person@Example.com", "displayName", "New Person"));
+        assertEquals("INVITED", result.get("status"));
+        List<?> members = client.get().uri("/api/v1/projects/" + projectId + "/members")
+                .header("X-Dev-User", "mirco").retrieve().body(List.class);
+        assertTrue(members.stream().map(Map.class::cast).anyMatch(m ->
+                email.equals(m.get("email")) && "INVITED".equals(m.get("invitation_status"))));
+
+        when(users.findByEmail(email)).thenReturn(Optional.of(new UserDirectory.User("new-person-sub", email, false)));
+        Map<?, ?> resent = post("mirco", "/projects/" + projectId + "/invitations/resend", Map.of("email", email));
+        assertEquals("RESENT", resent.get("status"));
+        verify(users).resendInvitation(email);
+
+        post("new-person-sub", "/me/activate", Map.of());
+        List<?> activated = client.get().uri("/api/v1/projects/" + projectId + "/members")
+                .header("X-Dev-User", "mirco").retrieve().body(List.class);
+        assertTrue(activated.stream().map(Map.class::cast).anyMatch(m ->
+                email.equals(m.get("email")) && "ACTIVE".equals(m.get("invitation_status"))));
     }
 
     private int claimAfter(CountDownLatch start, String user, String task, String workspace, String agent) throws Exception {
