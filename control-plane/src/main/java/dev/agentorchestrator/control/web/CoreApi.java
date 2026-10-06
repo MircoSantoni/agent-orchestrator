@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -30,6 +31,7 @@ public class CoreApi {
     public record InvitationInput(@NotBlank @Email String email, @NotBlank String displayName) {}
     public record ResendInput(@NotBlank @Email String email) {}
     public record WorkspaceInput(@NotBlank String name, @NotBlank String hostname, String os, @NotBlank String ownerDisplayName) {}
+    public record WorkspaceNameInput(@NotBlank String name) {}
     public record OrchestratorInput(@NotBlank String name, @NotBlank String type, String model) {}
     public record AgentInput(@NotBlank String externalId, @NotBlank String name, String role, String model) {}
     public record StatusInput(@NotBlank String status) {}
@@ -78,6 +80,18 @@ public class CoreApi {
     @PostMapping(value="/projects/{projectId}/workspaces", produces=MediaType.APPLICATION_JSON_VALUE)
     public String workspace(@PathVariable UUID projectId, @Valid @RequestBody WorkspaceInput input) {
         return store.workspace(store.registerWorkspace(projectId, input.name(), input.hostname(), input.os(), input.ownerDisplayName()));
+    }
+
+    @PatchMapping(value="/workspaces/{id}/name", produces=MediaType.APPLICATION_JSON_VALUE)
+    public String renameWorkspace(@PathVariable UUID id, @Valid @RequestBody WorkspaceNameInput input) {
+        store.renameWorkspace(id, input.name());
+        return store.workspace(id);
+    }
+
+    @DeleteMapping("/workspaces/{id}")
+    public Map<String, String> deleteWorkspace(@PathVariable UUID id) {
+        store.deleteWorkspace(id);
+        return Map.of("status", "DELETED");
     }
 
     @PostMapping("/workspaces/{id}/heartbeat")

@@ -42,16 +42,25 @@ public class McpApi {
                 tool("list_projects", "List projects available to this account", fields()),
                 tool("get_project", "Read project details", fields("projectId", "string"), "projectId"),
                 tool("list_workspaces", "List project workspaces and their owners", fields("projectId", "string"), "projectId"),
+                tool("rename_workspace", "Rename a workspace owned by this account", fields("workspaceId", "string", "name", "string"), "workspaceId", "name"),
+                tool("delete_workspace", "Remove an owned workspace from active use while preserving history; release active tasks first", fields("workspaceId", "string"), "workspaceId"),
                 tool("list_tasks", "List project tasks and their owners", fields("projectId", "string"), "projectId"),
+                tool("get_task", "Read a task and its current status", fields("taskId", "string"), "taskId"),
+                tool("create_task", "Create a task or subtask in a project", fields("projectId", "string", "parentTaskId", "string", "title", "string", "description", "string"), "projectId", "title"),
+                tool("update_task", "Edit a task title or description before it is claimed", fields("taskId", "string", "title", "string", "description", "string"), "taskId"),
+                tool("add_task_dependency", "Make a ready task wait for another task in the same project", fields("taskId", "string", "dependsOnTaskId", "string"), "taskId", "dependsOnTaskId"),
                 tool("list_agents", "List agents working in a project", fields("projectId", "string"), "projectId"),
                 tool("list_context", "List project facts, proposals and approved decisions", fields("projectId", "string"), "projectId"),
                 tool("list_resource_intents", "List resource intents and conflicts in a project", fields("projectId", "string"), "projectId"),
                 tool("list_inbox", "List messages for a workspace you own", fields("workspaceId", "string"), "workspaceId"),
-                tool("connect_agent", "Register an agent directly through MCP; repeat with the same keys to reconnect", fields("projectId", "string", "workspaceName", "string", "displayName", "string", "agentKey", "string", "agentName", "string", "role", "string", "model", "string"), "projectId", "workspaceName", "displayName", "agentKey", "agentName"),
+                tool("connect_agent", "Register an agent directly through MCP; use workspaceId to reconnect after renaming", fields("projectId", "string", "workspaceId", "string", "workspaceName", "string", "displayName", "string", "agentKey", "string", "agentName", "string", "role", "string", "model", "string"), "projectId", "displayName", "agentKey", "agentName"),
                 tool("heartbeat_agent", "Refresh presence for an agent and its remote workspace", fields("agentId", "string"), "agentId"),
                 tool("claim_task", "Atomically claim a ready task for your agent", fields("taskId", "string", "workspaceId", "string", "agentId", "string"), "taskId", "workspaceId", "agentId"),
                 tool("start_task", "Start a task claimed by your agent", fields("taskId", "string"), "taskId"),
                 tool("complete_task", "Complete a task owned by your workspace", fields("taskId", "string"), "taskId"),
+                tool("block_task", "Mark an in-progress task as blocked", fields("taskId", "string"), "taskId"),
+                tool("resume_task", "Resume a blocked task", fields("taskId", "string"), "taskId"),
+                tool("release_task", "Return an owned active task to the ready queue and free its agent", fields("taskId", "string"), "taskId"),
                 tool("announce_resource_intent", "Declare a read or write intent before touching a resource", fields("projectId", "string", "workspaceId", "string", "agentId", "string", "taskId", "string", "resourceType", "string", "resourcePath", "string", "intentType", "string", "leaseSeconds", "integer"), "projectId", "workspaceId", "agentId", "resourceType", "resourcePath", "intentType", "leaseSeconds"),
                 tool("propose_context", "Create a proposal pending human approval", fields("projectId", "string", "workspaceId", "string", "agentId", "string", "taskId", "string", "title", "string", "content", "string"), "projectId", "title", "content"),
                 tool("send_message", "Send a coordination message or task handoff", fields("projectId", "string", "fromWorkspaceId", "string", "fromAgentId", "string", "toWorkspaceId", "string", "toAgentId", "string", "taskId", "string", "type", "string", "subject", "string", "body", "string"), "projectId", "fromWorkspaceId", "toWorkspaceId", "type", "body"),
@@ -146,14 +155,44 @@ public class McpApi {
             case "list_projects" -> store.projects();
             case "get_project" -> store.project(uuid(a, "projectId"));
             case "list_workspaces" -> store.workspaces(uuid(a, "projectId"));
+            case "rename_workspace" -> {
+                UUID workspaceId = uuid(a, "workspaceId");
+                store.renameWorkspace(workspaceId, string(a, "name"));
+                yield store.workspace(workspaceId);
+            }
+            case "delete_workspace" -> {
+                store.deleteWorkspace(uuid(a, "workspaceId"));
+                yield "{\"status\":\"DELETED\"}";
+            }
             case "list_tasks" -> store.tasks(uuid(a, "projectId"));
+            case "get_task" -> store.task(uuid(a, "taskId"));
+            case "create_task" -> store.task(store.createTask(uuid(a, "projectId"), optionalUuid(a, "parentTaskId"),
+                    string(a, "title"), optionalString(a, "description") == null ? "" : optionalString(a, "description")));
+            case "update_task" -> {
+                UUID taskId = uuid(a, "taskId");
+                store.updateTask(taskId, optionalString(a, "title"), optionalString(a, "description"));
+                yield store.task(taskId);
+            }
+            case "add_task_dependency" -> {
+                store.addDependency(uuid(a, "taskId"), uuid(a, "dependsOnTaskId"));
+                yield "{\"status\":\"CREATED\"}";
+            }
             case "list_agents" -> store.agents(uuid(a, "projectId"));
             case "list_context" -> coordination.context(uuid(a, "projectId"));
             case "list_resource_intents" -> coordination.intents(uuid(a, "projectId"));
             case "list_inbox" -> coordination.inbox(uuid(a, "workspaceId"));
             case "connect_agent" -> {
-                UUID workspaceId = store.registerWorkspace(uuid(a, "projectId"), string(a, "workspaceName"),
-                        "remote-mcp", "Remote MCP", string(a, "displayName"));
+                UUID projectId = uuid(a, "projectId");
+                UUID existingWorkspaceId = optionalUuid(a, "workspaceId");
+                UUID workspaceId;
+                if (existingWorkspaceId != null) {
+                    store.ownWorkspace(existingWorkspaceId);
+                    if (!store.workspaceProject(existingWorkspaceId).equals(projectId)) throw ApiProblem.forbidden("Workspace is in another project");
+                    workspaceId = existingWorkspaceId;
+                } else {
+                    workspaceId = store.registerWorkspace(projectId, string(a, "workspaceName"),
+                            "remote-mcp", "Remote MCP", string(a, "displayName"));
+                }
                 UUID orchestratorId = store.registerOrchestrator(workspaceId, "mcp", "REMOTE_MCP", optionalString(a, "model"));
                 UUID agentId = store.registerAgent(orchestratorId, string(a, "agentKey"), string(a, "agentName"),
                         optionalString(a, "role"), optionalString(a, "model"));
@@ -175,6 +214,18 @@ public class McpApi {
             case "complete_task" -> {
                 store.transitionTask(uuid(a, "taskId"), "IN_PROGRESS", "COMPLETED");
                 yield "{\"status\":\"COMPLETED\"}";
+            }
+            case "block_task" -> {
+                store.transitionTask(uuid(a, "taskId"), "IN_PROGRESS", "BLOCKED");
+                yield "{\"status\":\"BLOCKED\"}";
+            }
+            case "resume_task" -> {
+                store.transitionTask(uuid(a, "taskId"), "BLOCKED", "IN_PROGRESS");
+                yield "{\"status\":\"IN_PROGRESS\"}";
+            }
+            case "release_task" -> {
+                store.releaseTask(uuid(a, "taskId"));
+                yield "{\"status\":\"READY\"}";
             }
             case "announce_resource_intent" -> "{\"id\":\"" + coordination.createIntent(uuid(a, "projectId"), uuid(a, "workspaceId"),
                     uuid(a, "agentId"), optionalUuid(a, "taskId"), string(a, "resourceType"), string(a, "resourcePath"),

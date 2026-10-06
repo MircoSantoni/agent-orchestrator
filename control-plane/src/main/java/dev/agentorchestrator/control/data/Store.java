@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,10 +53,14 @@ public class Store {
         return uuid("select project_id from workspace where id=?", workspaceId);
     }
 
+    public UUID activeWorkspaceProject(UUID workspaceId) {
+        return uuid("select project_id from workspace where id=? and deleted_at is null for share", workspaceId);
+    }
+
     public void ownWorkspace(UUID workspaceId) {
-        UUID projectId = workspaceProject(workspaceId);
+        UUID projectId = activeWorkspaceProject(workspaceId);
         member(projectId);
-        String owner = one("select owner_id from workspace where id=?", workspaceId);
+        String owner = one("select owner_id from workspace where id=? and deleted_at is null for share", workspaceId);
         if (!owner.equals(actor.sub())) throw ApiProblem.forbidden("Workspace belongs to another person");
     }
 
@@ -126,7 +131,7 @@ public class Store {
     public UUID registerWorkspace(UUID projectId, String name, String hostname, String os, String displayName) {
         member(projectId);
         UUID id = uuid("insert into workspace(project_id,owner_id,owner_display_name,name,hostname,os) values(?,?,?,?,?,?) " +
-                "on conflict(project_id,owner_id,name) do update set hostname=excluded.hostname,os=excluded.os,status='ONLINE',last_heartbeat_at=now(),updated_at=now() returning id",
+                "on conflict(project_id,owner_id,name) where deleted_at is null do update set hostname=excluded.hostname,os=excluded.os,status='ONLINE',last_heartbeat_at=now(),updated_at=now() returning id",
                 projectId, actor.sub(), displayName, name, hostname, os);
         activity(projectId, id, null, null, "WORKSPACE_CONNECTED", "Workspace connected", id);
         return id;
@@ -136,6 +141,35 @@ public class Store {
     public void heartbeatWorkspace(UUID id) {
         ownWorkspace(id);
         db.update("update workspace set last_heartbeat_at=now(),status='ONLINE',updated_at=now() where id=?", id);
+    }
+
+    @Transactional
+    public void deleteWorkspace(UUID id) {
+        ownWorkspace(id);
+        db.queryForObject("select id from workspace where id=? for update", UUID.class, id);
+        UUID projectId = workspaceProject(id);
+        Integer activeTasks = db.queryForObject("select count(*) from task where owner_workspace_id=? and status in ('CLAIMED','IN_PROGRESS','BLOCKED')", Integer.class, id);
+        if (activeTasks != null && activeTasks > 0)
+            throw ApiProblem.conflict("Complete or release active tasks before deleting this workspace");
+        List<UUID> queuedTasks = db.queryForList("update task set owner_workspace_id=null,updated_at=now() " +
+                "where owner_workspace_id=? and status in ('READY','BACKLOG') returning id", UUID.class, id);
+        for (UUID taskId : queuedTasks)
+            activity(projectId, id, null, taskId, "TASK_RELEASED", "Queued task returned to project", taskId);
+        db.update("update resource_intent set status='EXPIRED',updated_at=now() where workspace_id=? and status='ACTIVE'", id);
+        db.update("update agent set status='OFFLINE',current_task_id=null,updated_at=now() where orchestrator_id in (select id from orchestrator where workspace_id=?)", id);
+        db.update("update orchestrator set status='OFFLINE',updated_at=now() where workspace_id=?", id);
+        db.update("update workspace set status='OFFLINE',deleted_at=now(),updated_at=now() where id=?", id);
+        activity(projectId, id, null, null, "WORKSPACE_DELETED", "Workspace removed from active project", id);
+    }
+
+    @Transactional
+    public void renameWorkspace(UUID id, String name) {
+        ownWorkspace(id);
+        String label = name == null ? "" : name.trim();
+        if (label.isEmpty() || label.length() > 100) throw ApiProblem.badRequest("Workspace name must contain 1 to 100 characters");
+        try { db.update("update workspace set name=?,updated_at=now() where id=? and deleted_at is null", label, id); }
+        catch (DataIntegrityViolationException e) { throw ApiProblem.conflict("A workspace with this name already exists"); }
+        activity(workspaceProject(id), id, null, null, "WORKSPACE_RENAMED", "Workspace renamed", id);
     }
 
     @Transactional
@@ -202,6 +236,18 @@ public class Store {
     }
 
     @Transactional
+    public void updateTask(UUID taskId, String title, String description) {
+        UUID projectId = taskProject(taskId);
+        member(projectId);
+        if (title == null && description == null) throw ApiProblem.badRequest("Title or description required");
+        if (title != null && title.isBlank()) throw ApiProblem.badRequest("Title cannot be blank");
+        int changed = db.update("update task set title=coalesce(?,title),description=coalesce(?,description),updated_at=now() " +
+                "where id=? and status in ('READY','BACKLOG')", title, description, taskId);
+        if (changed != 1) throw ApiProblem.conflict("Task can only be edited before it is claimed");
+        activity(projectId, null, null, taskId, "TASK_UPDATED", "Task updated", taskId);
+    }
+
+    @Transactional
     public void addDependency(UUID taskId, UUID dependencyId) {
         UUID projectId = taskProject(taskId);
         member(projectId);
@@ -241,6 +287,21 @@ public class Store {
         activity(projectId, owner, agentId, taskId, "TASK_" + target, "Task " + target.toLowerCase(), taskId);
     }
 
+    @Transactional
+    public void releaseTask(UUID taskId) {
+        UUID projectId = taskProject(taskId);
+        member(projectId);
+        UUID owner = uuid("select owner_workspace_id from task where id=?", taskId);
+        ownWorkspace(owner);
+        UUID agentId = uuid("select executor_agent_id from task where id=?", taskId);
+        int changed = db.update("update task set status='READY',owner_workspace_id=null,executor_agent_id=null," +
+                "started_at=null,completed_at=null,updated_at=now() where id=? and status in ('CLAIMED','IN_PROGRESS','BLOCKED')", taskId);
+        if (changed != 1) throw ApiProblem.conflict("Only active tasks can be released");
+        db.update("update agent set current_task_id=null,status='IDLE',updated_at=now() where id=? and current_task_id=?", agentId, taskId);
+        db.update("update resource_intent set status='EXPIRED',updated_at=now() where task_id=? and status='ACTIVE'", taskId);
+        activity(projectId, owner, agentId, taskId, "TASK_RELEASED", "Task released", taskId);
+    }
+
     public String organization(UUID id) {
         Integer visible = db.queryForObject("select count(*) from organization o where o.id=? and (o.owner_sub=? or exists(select 1 from project p join project_member pm on pm.project_id=p.id where p.organization_id=o.id and pm.user_sub=?))", Integer.class, id, actor.sub(), actor.sub());
         if (visible == null || visible == 0) throw ApiProblem.forbidden("Not an organization member");
@@ -271,14 +332,14 @@ public class Store {
     public String orchestrators(UUID projectId) {
         member(projectId);
         return many("select row_to_json(x)::text from (select o.* from orchestrator o join workspace w " +
-                "on w.id=o.workspace_id where w.project_id=? order by o.created_at) x", projectId);
+                "on w.id=o.workspace_id where w.project_id=? and w.deleted_at is null order by o.created_at) x", projectId);
     }
     public String project(UUID id) { member(id); return one("select row_to_json(x)::text from (select * from project where id=?) x", id); }
     public String workspace(UUID id) { member(workspaceProject(id)); return one("select row_to_json(x)::text from (select * from workspace where id=?) x", id); }
     public String orchestrator(UUID id) { UUID wid = uuid("select workspace_id from orchestrator where id=?", id); member(workspaceProject(wid)); return one("select row_to_json(x)::text from (select * from orchestrator where id=?) x", id); }
     public String agent(UUID id) { member(workspaceProject(agentWorkspace(id))); return one("select row_to_json(x)::text from (select * from agent where id=?) x", id); }
     public String task(UUID id) { member(taskProject(id)); return one("select row_to_json(x)::text from (select * from task where id=?) x", id); }
-    public String workspaces(UUID projectId) { member(projectId); return many("select row_to_json(x)::text from (select * from workspace where project_id=? order by created_at) x", projectId); }
-    public String agents(UUID projectId) { member(projectId); return many("select row_to_json(x)::text from (select a.* from agent a join orchestrator o on o.id=a.orchestrator_id join workspace w on w.id=o.workspace_id where w.project_id=? order by a.created_at) x", projectId); }
+    public String workspaces(UUID projectId) { member(projectId); return many("select row_to_json(x)::text from (select * from workspace where project_id=? and deleted_at is null order by created_at) x", projectId); }
+    public String agents(UUID projectId) { member(projectId); return many("select row_to_json(x)::text from (select a.* from agent a join orchestrator o on o.id=a.orchestrator_id join workspace w on w.id=o.workspace_id where w.project_id=? and w.deleted_at is null order by a.created_at) x", projectId); }
     public String tasks(UUID projectId) { member(projectId); return many("select row_to_json(x)::text from (select * from task where project_id=? order by created_at) x", projectId); }
 }

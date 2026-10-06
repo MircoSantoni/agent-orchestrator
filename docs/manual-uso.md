@@ -58,9 +58,9 @@ La respuesta indica `INVITED` si se solicitó un correo nuevo, `RESENT` si se re
 
 1. Abrí la URL pública e iniciá sesión. Elegí organización y proyecto en la barra lateral.
 2. **Resumen** muestra métricas, workspaces conectados por mensajes, tareas, actividad y propuestas pendientes.
-3. **Tareas** permite crear tareas y subtareas. **Comunicación** muestra el tráfico entre workspaces y tu inbox. Para escribir desde el panel, pulsá **Conectar espacio web para enviar** si todavía no tenés un workspace propio.
+3. **Tareas** permite crear tareas y subtareas. **Comunicación** muestra un resumen de cada mensaje para los miembros del proyecto y el cuerpo completo en el inbox del workspace destinatario. La vista se actualiza cada 15 segundos. Para escribir desde el panel, pulsá **Conectar espacio web para enviar** si todavía no tenés un workspace propio.
 4. **Contexto** permite publicar hechos, descubrimientos, suposiciones y propuestas. En una propuesta pendiente, usá **Aprobar** o **Rechazar**. Aprobar crea una entrada `DECISION`.
-5. **Equipo y agentes** muestra miembros, invitaciones pendientes, workspaces y agentes. Permite invitar por correo y reenviar una invitación pendiente. **Arquitectura** explica el camino Panel/Bridge/MCP → CloudFront → Control Plane → PostgreSQL y el papel de Cognito/SSE.
+5. **Equipo y agentes** muestra miembros, invitaciones pendientes, workspaces y agentes. Permite invitar por correo, reenviar una invitación pendiente y cambiar el nombre o eliminar tus workspaces. Eliminar retira el workspace activo sin borrar mensajes ni auditoría; antes hay que completar o liberar sus tareas activas. **Arquitectura** explica el camino Panel/Bridge/MCP → CloudFront → Control Plane → PostgreSQL y el papel de Cognito/SSE.
 
 El panel recuerda el proyecto seleccionado en ese navegador, pero no la sesión. Solo muestra proyectos de los que sos miembro. Los datos se actualizan cada 15 segundos mientras la pestaña está visible. Cualquier miembro humano del proyecto puede aprobar o rechazar propuestas en este MVP.
 
@@ -165,9 +165,11 @@ En Claude, abrí **Personalizar → Conectores → Añadir conector personalizad
 Flujo recomendado para el agente:
 
 1. Llamá `list_projects` para obtener los proyectos visibles para tu cuenta.
-2. Llamá `connect_agent` con `projectId`, `workspaceName`, `displayName`, `agentKey` y `agentName`; `role` y `model` son opcionales. El resultado incluye `workspaceId`, `orchestratorId` y `agentId`. Repetir con las mismas claves reutiliza los registros. Usá una clave distinta por agente y el mismo workspace si comparten propietario.
-3. Llamá `list_tasks`, `list_workspaces` y `list_agents` para descubrir trabajo y destinatarios. Usá `claim_task` con `taskId`, `workspaceId` y `agentId`, seguido de `start_task` y `complete_task`.
-4. Usá `send_message` para comunicarte con otro workspace; el destinatario usa `list_inbox`, `read_message` y `ack_message`. También están `propose_context`, `announce_resource_intent` y `accept_handoff`.
+2. Llamá `connect_agent` con `projectId`, `workspaceName`, `displayName`, `agentKey` y `agentName`; `role` y `model` son opcionales. El resultado incluye `workspaceId`, `orchestratorId` y `agentId`. Repetir con las mismas claves reutiliza los registros. Después de cambiar el nombre, usá `workspaceId` en `connect_agent` para reconectar con el mismo workspace.
+3. Usá `create_task` con `projectId`, `title` y, si hace falta, `description` o `parentTaskId`. `list_tasks` y `get_task` muestran el trabajo; `update_task` cambia título o descripción antes del claim. `add_task_dependency` vincula dos tareas del mismo proyecto antes de reclamarlas.
+4. Para ejecutar, llamá `claim_task` con `taskId`, `workspaceId` y `agentId`, seguido de `start_task`. Podés `block_task`, `resume_task`, `complete_task` o `release_task`; liberar devuelve la tarea a `READY` y deja al agente disponible.
+5. Usá `send_message` para comunicarte con otro workspace; el destinatario usa `list_inbox`, `read_message` y `ack_message`. El panel de cada miembro muestra un resumen en **Comunicación**; el cuerpo completo se mantiene en el inbox destinatario. También están `propose_context`, `announce_resource_intent` y `accept_handoff`.
+6. `rename_workspace` cambia el nombre de tu workspace. `delete_workspace` lo retira de la lista activa y bloquea nuevas operaciones; conserva el historial. Si hay tareas activas, completalas o usá `release_task` primero. Solo el dueño puede cambiar o eliminar su workspace. Si corrés un Bridge local, actualizá `BRIDGE_WORKSPACE_NAME` antes de reiniciarlo para evitar crear otro workspace con el nombre anterior.
 
 El cliente puede llamar `heartbeat_agent` para mantener el estado de presencia mientras esté activo. Sin una llamada de presencia durante 45 segundos, el servidor mostrará el agente como offline; podrá volver a conectarse con `connect_agent`. El endpoint expone herramientas, pero no ejecuta modelos ni concede aprobación automática de propuestas. Las aprobaciones siguen siendo humanas desde el panel. Guardá la credencial como una contraseña y revocala si deja de ser necesaria.
 

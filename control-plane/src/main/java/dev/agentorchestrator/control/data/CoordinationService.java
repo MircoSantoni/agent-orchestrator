@@ -172,7 +172,7 @@ public class CoordinationService {
         store.ownWorkspace(fromWorkspaceId);
         if (!store.workspaceProject(fromWorkspaceId).equals(projectId)) throw ApiProblem.forbidden("Sender is in another project");
         if (fromAgentId != null && !store.agentWorkspace(fromAgentId).equals(fromWorkspaceId)) throw ApiProblem.forbidden("Sender agent is outside workspace");
-        if (toWorkspaceId == null || !store.workspaceProject(toWorkspaceId).equals(projectId)) throw ApiProblem.badRequest("Recipient workspace required in same project");
+        if (toWorkspaceId == null || !store.activeWorkspaceProject(toWorkspaceId).equals(projectId)) throw ApiProblem.badRequest("Recipient workspace required in same project");
         if (toAgentId != null && !store.agentWorkspace(toAgentId).equals(toWorkspaceId)) throw ApiProblem.badRequest("Recipient agent is outside workspace");
         if (taskId != null && !store.taskProject(taskId).equals(projectId)) throw ApiProblem.badRequest("Task is in another project");
         if (!List.of("HELP_REQUEST","CONFLICT_WARNING","TASK_HANDOFF","REVIEW_REQUEST","DISCOVERY","BLOCKER","ARTIFACT_READY","TASK_COMPLETED","COORDINATION_REQUEST").contains(type))
@@ -195,17 +195,22 @@ public class CoordinationService {
         return store.one("select row_to_json(x)::text from (select * from agent_message where id=?) x", id);
     }
 
-    /** Project-wide traffic metadata. Message bodies remain limited to the recipient inbox. */
+    /** Project members see a short preview; the complete body remains in the recipient inbox. */
     public String messageFlow(UUID projectId) {
         store.member(projectId);
-        return store.many("select row_to_json(x)::text from (select id,from_workspace_id,from_agent_id," +
-                "to_workspace_id,to_agent_id,type,status,created_at from agent_message where project_id=? " +
-                "order by created_at desc limit 100) x", projectId);
+        return store.many("select row_to_json(x)::text from (select m.id,m.from_workspace_id,m.from_agent_id," +
+                "m.to_workspace_id,m.to_agent_id,source.name as from_workspace_name,target.name as to_workspace_name," +
+                "m.type,m.status,left(coalesce(nullif(trim(m.subject),''),m.body),180) as summary," +
+                "m.created_at from agent_message m join workspace source on source.id=m.from_workspace_id " +
+                "left join workspace target on target.id=m.to_workspace_id where m.project_id=? " +
+                "order by m.created_at desc limit 100) x", projectId);
     }
 
     public String inbox(UUID workspaceId) {
         store.ownWorkspace(workspaceId);
-        return store.many("select row_to_json(x)::text from (select * from agent_message where to_workspace_id=? order by created_at desc) x", workspaceId);
+        return store.many("select row_to_json(x)::text from (select m.*,source.name as from_workspace_name " +
+                "from agent_message m join workspace source on source.id=m.from_workspace_id " +
+                "where m.to_workspace_id=? order by m.created_at desc) x", workspaceId);
     }
 
     @Transactional

@@ -219,6 +219,68 @@ class ControlPlaneTest {
     }
 
     @Test
+    void remoteAgentCanManageTasksAndRenameOrDeleteOwnedWorkspace() {
+        String connected = mcpText("mirco", "connect_agent", Map.of("projectId", projectId,
+                "workspaceName", "claude", "displayName", "Mirco", "agentKey", "claude-1", "agentName", "Claude"));
+        String workspace = jsonField(connected, "workspaceId");
+        String agent = jsonField(connected, "agentId");
+        String task = jsonField(mcpText("mirco", "create_task", Map.of("projectId", projectId,
+                "title", "Plan inicial", "description", "Definir el contrato")), "id");
+        String child = jsonField(mcpText("mirco", "create_task", Map.of("projectId", projectId,
+                "parentTaskId", task, "title", "Subtarea")), "id");
+        assertTrue(mcpText("mirco", "get_task", Map.of("taskId", child)).contains(task));
+        assertTrue(mcpText("mirco", "update_task", Map.of("taskId", task,
+                "title", "Plan revisado")).contains("Plan revisado"));
+        mcpText("mirco", "add_task_dependency", Map.of("taskId", child, "dependsOnTaskId", task));
+        assertEquals(true, ((Map<?, ?>) mcp("juan", "tools/call", "rename_workspace",
+                Map.of("workspaceId", workspace, "name", "Ajeno")).get("result")).get("isError"));
+        assertTrue(mcpText("mirco", "rename_workspace", Map.of("workspaceId", workspace,
+                "name", "Claude principal")).contains("Claude principal"));
+        assertEquals(workspace, jsonField(mcpText("mirco", "connect_agent", Map.of("projectId", projectId,
+                "workspaceId", workspace, "displayName", "Mirco", "agentKey", "claude-1",
+                "agentName", "Claude")), "workspaceId"));
+        mcpText("mirco", "claim_task", Map.of("taskId", task, "workspaceId", workspace, "agentId", agent));
+        assertEquals(true, ((Map<?, ?>) mcp("mirco", "tools/call", "delete_workspace",
+                Map.of("workspaceId", workspace)).get("result")).get("isError"));
+        mcpText("mirco", "start_task", Map.of("taskId", task));
+        mcpText("mirco", "block_task", Map.of("taskId", task));
+        assertEquals("BLOCKED", get("mirco", "/tasks/" + task).get("status"));
+        mcpText("mirco", "resume_task", Map.of("taskId", task));
+        mcpText("mirco", "release_task", Map.of("taskId", task));
+        assertEquals("READY", get("mirco", "/tasks/" + task).get("status"));
+        String parent = id(post("mirco", "/projects/" + projectId + "/tasks", Map.of("title", "Handoff source")));
+        post("mirco", "/tasks/" + parent + "/claim", Map.of("workspaceId", mircoWorkspace, "agentId", mircoAgent));
+        String handoff = id(post("mirco", "/projects/" + projectId + "/messages", Map.of(
+                "fromWorkspaceId", mircoWorkspace, "toWorkspaceId", workspace, "taskId", parent,
+                "type", "TASK_HANDOFF", "subject", "Queued child", "body", "Waiting for Claude")));
+        String queuedChild = post("mirco", "/messages/" + handoff + "/accept-handoff", Map.of()).get("taskId").toString();
+        assertEquals(workspace, get("mirco", "/tasks/" + queuedChild).get("owner_workspace_id"));
+        assertEquals(true, ((Map<?, ?>) mcp("juan", "tools/call", "delete_workspace",
+                Map.of("workspaceId", workspace)).get("result")).get("isError"));
+        mcpText("mirco", "delete_workspace", Map.of("workspaceId", workspace));
+        assertNull(get("mirco", "/tasks/" + queuedChild).get("owner_workspace_id"));
+        assertTrue(!mcpText("mirco", "list_workspaces", Map.of("projectId", projectId)).contains(workspace));
+        assertEquals(true, ((Map<?, ?>) mcp("mirco", "tools/call", "heartbeat_agent",
+                Map.of("agentId", agent)).get("result")).get("isError"));
+        String recreated = mcpText("mirco", "connect_agent", Map.of("projectId", projectId,
+                "workspaceName", "Claude principal", "displayName", "Mirco", "agentKey", "claude-2", "agentName", "Claude"));
+        assertNotEquals(workspace, jsonField(recreated, "workspaceId"));
+    }
+
+    @Test
+    void projectMessageFlowShowsPreviewToEachPerson() {
+        String message = id(post("mirco", "/projects/" + projectId + "/messages", Map.of(
+                "fromWorkspaceId", mircoWorkspace, "toWorkspaceId", juanWorkspace,
+                "type", "COORDINATION_REQUEST", "subject", "Revisar contrato", "body", "Detalle reservado para el destinatario")));
+        for (String user : List.of("mirco", "juan")) {
+            List<?> flow = client.get().uri("/api/v1/projects/" + projectId + "/message-flow")
+                    .header("X-Dev-User", user).retrieve().body(List.class);
+            assertTrue(flow.stream().map(Map.class::cast).anyMatch(item -> message.equals(item.get("id"))
+                    && "Revisar contrato".equals(item.get("summary")) && !item.containsKey("body")));
+        }
+    }
+
+    @Test
     void legacyMcpClientCanInitializeAndCallTools() {
         Map<?, ?> init = client.post().uri("/mcp").header("X-Dev-User", "mirco")
                 .contentType(MediaType.APPLICATION_JSON).body(Map.of("jsonrpc", "2.0", "id", 1,
