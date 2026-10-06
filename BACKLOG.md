@@ -4,8 +4,8 @@
 
 - M0: base Java 25 / Spring Boot 4.1, PostgreSQL, Flyway, Docker y Testcontainers operativos.
 - M1: primer demo local verificado con dos Bridges simulados, conflicto WRITE/WRITE y mensaje recibido por SSE.
-- M2: escenario manual con tres Bridges, propuesta aprobada por otra persona y handoff a subtarea verificado. Siguen pendientes el endurecimiento de seguridad, cobertura de reconexión SSE y semántica completa de recursos.
-- M3: despliegue en AWS pendiente de región, dominio, presupuesto y credenciales de infraestructura.
+- M2: escenario manual con tres Bridges, propuesta aprobada por otra persona y handoff a subtarea verificado. También quedaron implementados heartbeats de agentes, resincronización REST tras SSE, intents con solapamiento de paths, UI mínima de aprobación, Cognito PKCE para humano/Bridge y autorización JWT por audience/scope/cliente. Se agregaron pruebas de SSE y compatibilidad con el SDK Java MCP 2.0.1.
+- M3: infraestructura Terraform validada localmente. Aplicación en AWS pendiente de región, dominio, presupuesto, callbacks MCP y acceso a la cuenta personal. Las pruebas con Cognito real, clientes MCP externos y dos réplicas pertenecen a ese cierre.
 
 ## Objetivo
 
@@ -128,7 +128,9 @@ Coordinar por Internet a varias personas, cada una con su propio orquestador y a
 
 `A → B → C → D → E → F → G → H`. El Bridge básico puede avanzar junto con C–E. El primer demo requiere A–E, seguridad mínima de B y AB-001 a AB-004. El despliegue AWS requiere decidir región, dominio y autenticación humana antes de aprovisionar.
 
-## Pendientes de definición antes de codificar esas partes
+## Pendientes para el cierre en AWS
 
-1. Definir región AWS, dominio y presupuesto objetivo antes del despliegue.
-2. Elegir el flujo de invitación y autenticación interactiva de miembros en Cognito.
+1. Elegir región, dominio/Hosted Zone, presupuesto y correo de alerta; calcular coste regional antes de aplicar Terraform.
+2. Crear el backend S3 de estado, revisar el plan, publicar la imagen inmutable y aplicar la infraestructura con la cuenta personal.
+3. Crear usuarios de Cognito por invitación administrativa, registrar callbacks MCP concretos y completar pruebas OAuth y MCP desde clientes externos.
+4. Verificar health checks, logs, SSE y resincronización con dos tareas ECS, más el flujo E2E de tres Bridges contra el servicio público.

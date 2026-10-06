@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: agent-orchestrator-control-plane
+logging:
+  structured:
+    format:
+      console: ecs

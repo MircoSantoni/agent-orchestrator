@@ -1,17 +1,15 @@
 # Agent Orchestrator
 
-Control Plane y Agent Bridge simulado para coordinar personas y agentes que trabajan en un mismo proyecto. El servidor persiste el estado en PostgreSQL; REST realiza cambios y SSE distribuye notificaciones.
+Control Plane para coordinar personas y agentes sobre un proyecto compartido. PostgreSQL conserva tareas, presencia, intents, contexto, mensajes y actividad. REST cambia el estado; SSE notifica a Bridges simulados; `/mcp` expone herramientas para clientes MCP.
 
-## Estado del MVP
+## Estado
 
-El primer flujo funciona localmente con tres Bridges simulados: registro, presencia, tareas, claim atómico, resource intents, conflicto WRITE/WRITE, mensajería, propuesta y aprobación humana, handoff a subtarea y activity stream. El Control Plane también expone una entrada MCP remota. La integración real con Claude y el despliegue AWS quedan pendientes.
+El MVP local cubre el escenario de tres Bridges, claim atómico, dependencias y subtareas, intents con detección de solapamiento, propuestas con aprobación humana, mensajería y recuperación tras cortes SSE. Hay un panel mínimo de aprobación en `/`. El despliegue AWS está preparado en `infra/terraform`, pero todavía no se ha aplicado en ninguna cuenta. La integración con Claude real sigue fuera del alcance de esta primera versión: los Bridges son simulados.
 
-## Requisitos
+## Requisitos locales
 
-- Java 25 y Maven 3.9 para compilar y ejecutar los Bridges.
-- Docker para PostgreSQL y las pruebas Testcontainers.
-
-## Ejecutar localmente
+- Java 25 y Maven 3.9.
+- Docker Desktop para PostgreSQL, Compose y pruebas Testcontainers.
 
 ```powershell
 docker compose up -d postgres
@@ -24,17 +22,11 @@ $env:SPRING_PROFILES_ACTIVE = 'dev'
 java -jar control-plane/target/control-plane-0.1.0-SNAPSHOT.jar
 ```
 
-También se puede ejecutar el servidor en Docker después de generar la imagen:
-
-```powershell
-docker compose --profile app up --build -d
-```
-
-El perfil `dev` usa `X-Dev-User` únicamente para demostración local. Nunca se debe activar en un servicio accesible por Internet. Fuera de ese perfil, la API exige un JWT firmado de un emisor OIDC configurado mediante `OIDC_ISSUER_URI`; `app.security.human-client-id` y `app.security.bridge-client-id` identifican los dos clientes permitidos. La aprobación exige el cliente humano. La membresía y el ownership se verifican en PostgreSQL.
+Como alternativa, `docker compose --profile app up --build -d` inicia PostgreSQL y Control Plane en contenedores. Abrí `http://127.0.0.1:8080/` para el panel. En el perfil `dev`, la identidad de demostración se indica con `X-Dev-User`; este perfil debe quedar restringido al equipo local.
 
 ## Bridge simulado
 
-Cada instancia necesita un `BRIDGE_PROJECT_ID`, un `BRIDGE_OWNER_ID` ya incorporado al proyecto, un nombre de workspace y un puerto local diferente:
+Después de crear un proyecto y sus miembros, iniciá una instancia por persona, con `BRIDGE_PORT`, `BRIDGE_WORKSPACE_NAME` y `BRIDGE_OWNER_ID` propios:
 
 ```powershell
 $env:BRIDGE_PROJECT_ID = '<project-uuid>'
@@ -45,44 +37,24 @@ $env:BRIDGE_PORT = '8091'
 java -jar agent-bridge/target/agent-bridge-0.1.0-SNAPSHOT.jar
 ```
 
-El Bridge escucha solo en `127.0.0.1`. Para producción, `CONTROL_PLANE_URL` debe apuntar al servicio HTTPS y `BRIDGE_TOKEN` debe contener un access token válido obtenido por el usuario. La adquisición y renovación automática con PKCE aún no está implementada.
+El Bridge escucha solo en `127.0.0.1`. Expone `GET /local/state`, `GET /local/events`, `POST /local/agents`, operaciones de tareas, intents y mensajes. Envía heartbeat de workspace, orquestador y agentes registrados; al reconectar SSE reconstruye el estado desde REST. `GET /local/state` incluye `sseConnected`, `lastSyncAt` y el snapshot.
 
-Rutas locales principales:
+Para el servicio remoto, configurá `CONTROL_PLANE_URL` con la URL HTTPS y estas variables obtenidas tras desplegar Cognito: `BRIDGE_OIDC_AUTHORIZATION_URL` (`<cognito-domain>/oauth2/authorize`), `BRIDGE_OIDC_TOKEN_URL` (`<cognito-domain>/oauth2/token`), `BRIDGE_OIDC_CLIENT_ID`, `BRIDGE_OIDC_SCOPE` (`openid profile <api-scope>`) y `BRIDGE_OIDC_RESOURCE` (URL pública del API). El Bridge abre el navegador con Authorization Code + PKCE y recibe el callback en `http://127.0.0.1:8765/callback`. Mantiene los tokens solo en memoria y renueva el access token mientras está abierto. `BRIDGE_TOKEN` permite aportar un token externo para diagnósticos.
 
-- `GET /local/state`, `GET /local/events`
-- `POST /local/agents`, `PATCH /local/agents/{id}/status`
-- `POST /local/tasks/{id}/claim`, `/start`, `/complete`
-- `POST /local/resource-intents`, `POST /local/messages`
+## Identidad y aprobación
 
-El Control Plane expone `/api/v1` y `/actuator/health`.
+En producción, Spring valida la firma JWT mediante el JWKS del issuer OIDC, emisor, vigencia, `token_use=access`, cliente autorizado, audience y scope. Cada operación comprueba membresía y ownership en PostgreSQL. Solo el cliente humano puede aprobar o rechazar propuestas. El panel usa un cliente público Cognito con PKCE; permite ver propuestas pendientes y decidirlas. Al cerrar o recargar la pestaña, los tokens en memoria se pierden y se inicia sesión de nuevo.
 
 ## MCP remoto
 
-El endpoint `POST /mcp` expone un subconjunto de MCP Streamable HTTP `2026-07-28`: `server/discover`, `tools/list` y `tools/call`. Es stateless y reutiliza la autenticación JWT y los permisos de proyecto y workspace de la API REST. En modo `dev`, se puede usar `X-Dev-User` solo para pruebas locales. El cliente debe enviar `MCP-Protocol-Version`, `Mcp-Method` y, en `tools/call`, `Mcp-Name`; además debe incluir la versión y sus capacidades en `params._meta`. No hay compatibilidad con clientes que solo implementen el handshake de 2025.
+`POST /mcp` soporta la negociación `2025-11-25` (`initialize`, `tools/list`, `tools/call`) y el subconjunto stateless `2026-07-28` (`server/discover`, `tools/list`, `tools/call`). La versión 2025 se verificó con `io.modelcontextprotocol.sdk:mcp:2.0.1`; la versión 2026 tiene pruebas de protocolo HTTP. Las herramientas son `get_project`, `list_tasks`, `list_agents`, `list_context`, `list_resource_intents`, `list_inbox`, `claim_task`, `announce_resource_intent`, `propose_context`, `send_message` y `accept_handoff`. Ninguna permite aprobar propuestas.
 
-Herramientas disponibles: `get_project`, `list_tasks`, `list_agents`, `list_context`, `list_resource_intents`, `list_inbox`, `claim_task`, `announce_resource_intent`, `propose_context`, `send_message` y `accept_handoff`. Cada llamada recibe IDs explícitos; los servicios comprueban la membresía y el ownership. Las propuestas quedan pendientes: no se expone aprobación humana a los agentes.
+En producción, el endpoint anuncia `/.well-known/oauth-protected-resource`; Cognito funciona como authorization server. El cliente MCP debe registrar previamente su callback en `mcp_callback_urls`, usar Authorization Code + PKCE y pedir el scope y resource publicados. El cliente debe conservar y renovar sus credenciales según su implementación. Las capacidades MCP se limitan a herramientas; no hay recursos, prompts, sesiones ni servidor de autorización propio. Los clientes web con `Origin` requieren inclusión exacta en `APP_MCP_ALLOWED_ORIGINS`.
 
-Ejemplo local para descubrir el servidor:
+## AWS
 
-```powershell
-$body = @{
-  jsonrpc = '2.0'; id = 1; method = 'server/discover'
-  params = @{ _meta = @{
-    'io.modelcontextprotocol/protocolVersion' = '2026-07-28'
-    'io.modelcontextprotocol/clientCapabilities' = @{}
-  }}
-} | ConvertTo-Json -Depth 6
-Invoke-RestMethod -Uri 'http://127.0.0.1:8080/mcp' -Method Post -ContentType 'application/json' `
-  -Headers @{ 'MCP-Protocol-Version' = '2026-07-28'; 'Mcp-Method' = 'server/discover'; 'X-Dev-User' = 'local-user' } `
-  -Body $body
-```
+La topología, variables, bootstrap, despliegue y rollback están documentados en `infra/README.md`. El paso que usa la cuenta AWS personal se hará al final, después de fijar región, dominio/Hosted Zone, correo y presupuesto aceptable, callbacks MCP y perfil de AWS.
 
-Si un cliente web envía `Origin`, configúrelo en `APP_MCP_ALLOWED_ORIGINS` como lista de orígenes exactos separados por comas. Sin esa lista, las peticiones con `Origin` se rechazan. El despliegue público requiere HTTPS y un emisor OIDC configurado. La conexión OAuth interactiva desde clientes MCP y la compatibilidad con protocolos anteriores siguen pendientes.
+## Verificación
 
-## Pruebas
-
-`mvn test` levanta PostgreSQL con Testcontainers y comprueba claim concurrente, conflicto auditable, propuesta pendiente, aprobación y handoff a subtarea. El flujo manual con tres Bridges se verificó sobre PostgreSQL en Docker.
-
-## Próximos pasos
-
-Completar autenticación interactiva Cognito + PKCE para Bridges, personas y clientes MCP, verificar interoperabilidad con clientes MCP reales, ampliar pruebas de SSE y reconexión, definir infraestructura AWS como código y desplegar. El detalle está en `BACKLOG.md`.
+`mvn test` usa PostgreSQL real en Testcontainers. Cubre permisos, claims concurrentes, propuestas, handoff, intents, SSE con `Last-Event-ID`, cliente MCP oficial y contrato HTTP MCP. `terraform fmt -check -recursive`, `terraform init -backend=false` y `terraform validate` comprueban la plantilla sin tocar una cuenta AWS. La validación en dos réplicas, OAuth real de Cognito, clientes MCP externos y costes solo puede cerrarse durante el despliegue final.

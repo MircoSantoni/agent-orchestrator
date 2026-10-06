@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class McpApi {
     private static final String VERSION = "2026-07-28";
+    private static final String LEGACY_VERSION = "2025-11-25";
     private static final String VERSION_KEY = "io.modelcontextprotocol/protocolVersion";
     private static final String CAPABILITIES_KEY = "io.modelcontextprotocol/clientCapabilities";
     private static final Map<String, Object> SERVER_INFO = Map.of("name", "agent-orchestrator", "version", "0.1.0");
@@ -59,8 +60,12 @@ public class McpApi {
             @RequestHeader(value = "Origin", required = false) String origin) {
         Object id = request.get("id");
         if (origin != null && !allowedOrigins.contains(origin)) return error(HttpStatus.FORBIDDEN, id, -32000, "Origin not allowed");
-        if (!"2.0".equals(request.get("jsonrpc")) || id == null || !(request.get("method") instanceof String method))
+        if (!"2.0".equals(request.get("jsonrpc")) || !(request.get("method") instanceof String method))
             return error(HttpStatus.BAD_REQUEST, id, -32600, "Invalid JSON-RPC request");
+        if ("notifications/initialized".equals(method) && id == null)
+            return ResponseEntity.status(HttpStatus.ACCEPTED).build();
+        if (id == null) return error(HttpStatus.BAD_REQUEST, null, -32600, "Request id required");
+        if (legacy(request, versionHeader, method)) return legacyCall(id, method, request.get("params"));
         if (!(request.get("params") instanceof Map<?, ?> params) || !(params.get("_meta") instanceof Map<?, ?> meta))
             return error(HttpStatus.BAD_REQUEST, id, -32602, "Request metadata required");
         if (versionHeader == null || methodHeader == null)
@@ -81,22 +86,51 @@ public class McpApi {
             case "server/discover" -> ok(id, Map.of("resultType", "complete", "supportedVersions", List.of(VERSION),
                     "capabilities", Map.of("tools", Map.of("listChanged", false)), "ttlMs", 0, "cacheScope", "private"));
             case "tools/list" -> ok(id, Map.of("resultType", "complete", "tools", tools, "ttlMs", 0, "cacheScope", "private"));
-            case "tools/call" -> call(id, params);
+            case "tools/call" -> call(id, params, false);
             default -> error(HttpStatus.NOT_FOUND, id, -32601, "Method not found");
         };
     }
 
-    private ResponseEntity<Map<String, Object>> call(Object id, Map<?, ?> params) {
-        String name = (String) params.get("name");
+    private boolean legacy(Map<String, Object> request, String versionHeader, String method) {
+        if ("initialize".equals(method)) return true;
+        if (!List.of("tools/list", "tools/call").contains(method)) return false;
+        if (LEGACY_VERSION.equals(versionHeader)) return true;
+        if (versionHeader != null) return false;
+        return request.get("params") instanceof Map<?, ?> params && !params.containsKey("_meta");
+    }
+
+    private ResponseEntity<Map<String, Object>> legacyCall(Object id, String method, Object rawParams) {
+        actor.sub();
+        if (!(rawParams instanceof Map<?, ?> params)) return error(HttpStatus.BAD_REQUEST, id, -32602, "Params object required");
+        return switch (method) {
+            case "initialize" -> legacyOk(id, Map.of("protocolVersion", LEGACY_VERSION,
+                    "capabilities", Map.of("tools", Map.of("listChanged", false)), "serverInfo", SERVER_INFO));
+            case "tools/list" -> legacyOk(id, Map.of("tools", tools));
+            case "tools/call" -> call(id, params, true);
+            default -> error(HttpStatus.NOT_FOUND, id, -32601, "Method not found");
+        };
+    }
+
+    private ResponseEntity<Map<String, Object>> call(Object id, Map<?, ?> params, boolean legacy) {
+        if (!(params.get("name") instanceof String name))
+            return error(HttpStatus.BAD_REQUEST, id, -32602, "Tool name required");
         if (tools.stream().noneMatch(t -> name.equals(t.get("name"))))
             return error(HttpStatus.NOT_FOUND, id, -32602, "Unknown tool");
         try {
             if (!(params.get("arguments") instanceof Map<?, ?> arguments)) throw new IllegalArgumentException("Arguments object required");
             String output = execute(name, arguments);
-            return ok(id, Map.of("resultType", "complete", "content", List.of(Map.of("type", "text", "text", output)), "isError", false));
+            Map<String, Object> result = Map.of("content", List.of(Map.of("type", "text", "text", output)), "isError", false);
+            return legacy ? legacyOk(id, result) : ok(id, withResultType(result));
         } catch (ApiProblem | IllegalArgumentException e) {
-            return ok(id, Map.of("resultType", "complete", "content", List.of(Map.of("type", "text", "text", e.getMessage())), "isError", true));
+            Map<String, Object> result = Map.of("content", List.of(Map.of("type", "text", "text", e.getMessage())), "isError", true);
+            return legacy ? legacyOk(id, result) : ok(id, withResultType(result));
         }
+    }
+
+    private static Map<String, Object> withResultType(Map<String, Object> result) {
+        Map<String, Object> value = new LinkedHashMap<>(result);
+        value.put("resultType", "complete");
+        return value;
     }
 
     private String execute(String name, Map<?, ?> a) {
@@ -172,6 +206,9 @@ public class McpApi {
         Map<String, Object> value = new LinkedHashMap<>(result);
         value.put("_meta", Map.of("io.modelcontextprotocol/serverInfo", SERVER_INFO));
         return ResponseEntity.ok(Map.of("jsonrpc", "2.0", "id", id, "result", value));
+    }
+    private static ResponseEntity<Map<String, Object>> legacyOk(Object id, Map<String, Object> result) {
+        return ResponseEntity.ok(Map.of("jsonrpc", "2.0", "id", id, "result", result));
     }
     private static ResponseEntity<Map<String, Object>> error(HttpStatus status, Object id, int code, String message) {
         return error(status, id, code, message, Map.of());

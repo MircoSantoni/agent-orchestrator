@@ -4,3 +4,10 @@ target/
 .idea/
 .env
 *.log
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+backend.hcl
+crash.log

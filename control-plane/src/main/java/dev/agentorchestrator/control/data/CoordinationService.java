@@ -3,6 +3,8 @@ package dev.agentorchestrator.control.data;
 import dev.agentorchestrator.control.security.Actor;
 import dev.agentorchestrator.control.web.ApiProblem;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -29,7 +31,18 @@ public class CoordinationService {
         String path = raw.replace('\\', '/').replaceAll("/+", "/");
         if (path.startsWith("/") || path.matches("^[A-Za-z]:.*") || List.of(path.split("/")).contains(".."))
             throw ApiProblem.badRequest("Resource path must be relative to the repository");
-        return path;
+        List<String> parts = new ArrayList<>();
+        for (String part : path.split("/")) if (!part.isBlank() && !part.equals(".")) parts.add(part);
+        return parts.isEmpty() ? "." : String.join("/", parts);
+    }
+
+    private boolean overlaps(String firstPath, String firstType, String secondPath, String secondType) {
+        if (firstType.equals("REPOSITORY") || secondType.equals("REPOSITORY")) return true;
+        if (firstPath.equals(secondPath)) return true;
+        boolean firstContainer = List.of("DIRECTORY", "MODULE", "SERVICE").contains(firstType);
+        boolean secondContainer = List.of("DIRECTORY", "MODULE", "SERVICE").contains(secondType);
+        return firstContainer && secondPath.startsWith(firstPath + "/")
+                || secondContainer && firstPath.startsWith(secondPath + "/");
     }
 
     @Transactional
@@ -44,20 +57,28 @@ public class CoordinationService {
                 || !List.of("READ","WRITE").contains(intentType) || leaseSeconds < 30 || leaseSeconds > 3600)
             throw ApiProblem.badRequest("Invalid resource intent");
         String normalized = path(resourcePath);
-        db.queryForObject("select pg_advisory_xact_lock(hashtext(?))", Object.class, projectId + ":" + normalized);
-        List<String> otherTypes = db.queryForList("select intent_type from resource_intent where project_id=? and resource_path=? and status='ACTIVE' and lease_until>now() and agent_id<>?", String.class,
-                projectId, normalized, agentId);
+        if (normalized.equals(".") && !resourceType.equals("REPOSITORY"))
+            throw ApiProblem.badRequest("Only a repository intent may use the repository root");
+        // Serialize all intent creation in a project so parent/child paths cannot race.
+        db.queryForObject("select pg_advisory_xact_lock(hashtext(?))", Object.class, projectId.toString());
+        List<Map<String, Object>> conflicts = db.queryForList(
+                "select resource_path,resource_type,intent_type,agent_id from resource_intent " +
+                "where project_id=? and status='ACTIVE' and lease_until>now() and agent_id<>?", projectId, agentId)
+                .stream().filter(other -> overlaps(normalized, resourceType,
+                        (String) other.get("resource_path"), (String) other.get("resource_type")))
+                .filter(other -> !(intentType.equals("READ") && "READ".equals(other.get("intent_type")))).toList();
         UUID id = id("insert into resource_intent(project_id,workspace_id,agent_id,task_id,resource_type,resource_path,intent_type,lease_until) " +
                 "values(?,?,?,?,?,?,?,now()+(? * interval '1 second')) returning id",
                 projectId, workspaceId, agentId, taskId, resourceType, normalized, intentType, leaseSeconds);
         store.activity(projectId, workspaceId, agentId, taskId, "RESOURCE_INTENT_CREATED", "Intent " + intentType + " " + normalized, id);
-        if (!otherTypes.isEmpty() && !(intentType.equals("READ") && otherTypes.stream().allMatch("READ"::equals))) {
-            String severity = intentType.equals("WRITE") && otherTypes.contains("WRITE") ? "HIGH" : "WARNING";
+        if (!conflicts.isEmpty()) {
+            String severity = intentType.equals("WRITE") && conflicts.stream().anyMatch(other -> "WRITE".equals(other.get("intent_type"))) ? "HIGH" : "WARNING";
+            String agentsJson = "[\"" + agentId + "\"" + conflicts.stream()
+                    .map(other -> ",\"" + other.get("agent_id") + "\"").distinct().reduce("", String::concat) + "]";
             db.update("insert into activity_event(project_id,workspace_id,agent_id,task_id,type,summary,payload) " +
-                    "values(?,?,?,?,'RESOURCE_CONFLICT_DETECTED',?,jsonb_build_object('entityId',?::text,'resourcePath',?,'severity',?,'agents'," +
-                    "(select jsonb_agg(distinct agent_id) from resource_intent where project_id=? and resource_path=? and status='ACTIVE' and lease_until>now())))",
+                    "values(?,?,?,?,'RESOURCE_CONFLICT_DETECTED',?,jsonb_build_object('entityId',?::text,'resourcePath',?,'severity',?,'agents',?::jsonb))",
                     projectId, workspaceId, agentId, taskId, severity + " conflict on " + normalized,
-                    id.toString(), normalized, severity, projectId, normalized);
+                    id.toString(), normalized, severity, agentsJson);
         }
         return id;
     }

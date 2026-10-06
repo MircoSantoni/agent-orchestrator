@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Orchestrator</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, Segoe UI, sans-serif; background: #111827; color: #e5e7eb; }
+    body { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+    header, .controls, .card-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    h1 { margin: 0; font-size: 1.75rem; } h2 { font-size: 1.1rem; margin: 0 0 1rem; }
+    p, small { color: #9ca3af; } .controls { margin: 2rem 0; flex-wrap: wrap; }
+    input { background: #1f2937; color: #f9fafb; border: 1px solid #4b5563; border-radius: .5rem; padding: .7rem; min-width: 18rem; }
+    button { background: #3b82f6; color: white; border: 0; border-radius: .5rem; padding: .7rem 1rem; cursor: pointer; }
+    button.secondary { background: #374151; } button.danger { background: #991b1b; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
+    section { background: #1f2937; border: 1px solid #374151; border-radius: .8rem; padding: 1.25rem; }
+    article { border-top: 1px solid #374151; padding: .8rem 0; }
+    article:first-of-type { border: 0; padding-top: 0; }
+    .badge { color: #93c5fd; font-size: .8rem; } .actions { display: flex; gap: .5rem; margin-top: .8rem; }
+    #status { margin: .7rem 0; min-height: 1.5rem; } .error { color: #fca5a5; }
+    code { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <header>
+    <div><h1>Agent Orchestrator</h1><small>Estado compartido y decisiones del proyecto</small></div>
+    <div><button id="login">Ingresar</button> <button id="logout" class="secondary" hidden>Salir</button></div>
+  </header>
+  <div class="controls">
+    <label>Project ID <input id="projectId" placeholder="UUID del proyecto"></label>
+    <label id="devIdentity" hidden>Usuario local <input id="devUser" value="local-user"></label>
+    <button id="load">Actualizar</button>
+  </div>
+  <div id="status" role="status"></div>
+  <main class="grid">
+    <section><h2>Propuestas pendientes</h2><div id="proposals"></div></section>
+    <section><h2>Tareas</h2><div id="tasks"></div></section>
+    <section><h2>Agentes</h2><div id="agents"></div></section>
+    <section><h2>Intents de recursos</h2><div id="intents"></div></section>
+    <section><h2>Actividad reciente</h2><div id="activity"></div></section>
+  </main>
+  <script src="/app.js" defer></script>
+</body>
+</html>

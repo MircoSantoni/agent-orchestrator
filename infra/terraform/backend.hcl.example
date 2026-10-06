@@ -1,0 +1,5 @@
+bucket       = "replace-with-private-terraform-state-bucket"
+key          = "agent-orchestrator/terraform.tfstate"
+region       = "sa-east-1"
+encrypt      = true
+use_lockfile = true

@@ -16,6 +16,18 @@ spring:
           issuer-uri: ${OIDC_ISSUER_URI:https://invalid.example/issuer}
 server:
   port: ${PORT:8080}
+  forward-headers-strategy: framework
+app:
+  security:
+    public-base-url: ${PUBLIC_BASE_URL:}
+    cognito-domain: ${COGNITO_DOMAIN:}
+    human-client-id: ${HUMAN_CLIENT_ID:}
+    bridge-client-id: ${BRIDGE_CLIENT_ID:}
+    mcp-client-id: ${MCP_CLIENT_ID:}
+    required-scope: ${API_SCOPE:agent-orchestrator/api}
+    audience: ${API_AUDIENCE:}
+  mcp:
+    allowed-origins: ${APP_MCP_ALLOWED_ORIGINS:}
 management:
   endpoints:
     web:

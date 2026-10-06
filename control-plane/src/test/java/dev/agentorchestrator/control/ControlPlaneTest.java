@@ -7,6 +7,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import io.modelcontextprotocol.client.McpClient;
+import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
+import io.modelcontextprotocol.spec.McpSchema;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -97,6 +107,20 @@ class ControlPlaneTest {
     }
 
     @Test
+    void officialMcpJavaClientCanDiscoverAndCallTools() {
+        var transport = HttpClientStreamableHttpTransport.builder("http://127.0.0.1:" + port)
+                .endpoint("/mcp")
+                .requestBuilder(HttpRequest.newBuilder().header("X-Dev-User", "mirco"))
+                .build();
+        try (var sdk = McpClient.sync(transport).build()) {
+            assertEquals("2025-11-25", sdk.initialize().protocolVersion());
+            assertTrue(sdk.listTools().tools().stream().anyMatch(t -> "list_tasks".equals(t.name())));
+            var result = sdk.callTool(new McpSchema.CallToolRequest("list_tasks", Map.of("projectId", projectId)));
+            assertEquals(false, result.isError());
+        }
+    }
+
+    @Test
     void mcpCoordinatesThroughSameAuthorizationAndKeepsApprovalHuman() {
         Map<?, ?> discovery = (Map<?, ?>) mcp("mirco", "server/discover", null, Map.of()).get("result");
         assertEquals(List.of("2026-07-28"), discovery.get("supportedVersions"));
@@ -125,6 +149,29 @@ class ControlPlaneTest {
                 .header("X-Dev-User", "mirco").retrieve().body(List.class);
         assertTrue(context.stream().map(Map.class::cast).anyMatch(entry ->
                 "Design".equals(entry.get("title")) && "PENDING_APPROVAL".equals(entry.get("status"))));
+    }
+
+    @Test
+    void legacyMcpClientCanInitializeAndCallTools() {
+        Map<?, ?> init = client.post().uri("/mcp").header("X-Dev-User", "mirco")
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("jsonrpc", "2.0", "id", 1,
+                        "method", "initialize", "params", Map.of("protocolVersion", "2025-11-25",
+                                "capabilities", Map.of(), "clientInfo", Map.of("name", "test", "version", "1"))))
+                .retrieve().body(Map.class);
+        assertEquals("2025-11-25", ((Map<?, ?>) init.get("result")).get("protocolVersion"));
+        Map<?, ?> listed = client.post().uri("/mcp").header("X-Dev-User", "mirco")
+                .header("MCP-Protocol-Version", "2025-11-25")
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("jsonrpc", "2.0", "id", 2,
+                        "method", "tools/list", "params", Map.of()))
+                .retrieve().body(Map.class);
+        assertTrue(((List<?>) ((Map<?, ?>) listed.get("result")).get("tools")).size() > 5);
+        Map<?, ?> call = client.post().uri("/mcp").header("X-Dev-User", "mirco")
+                .header("MCP-Protocol-Version", "2025-11-25")
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("jsonrpc", "2.0", "id", 3,
+                        "method", "tools/call", "params", Map.of("name", "list_tasks",
+                                "arguments", Map.of("projectId", projectId))))
+                .retrieve().body(Map.class);
+        assertEquals(false, ((Map<?, ?>) call.get("result")).get("isError"));
     }
 
     @Test
@@ -158,6 +205,26 @@ class ControlPlaneTest {
                 .header("X-Dev-User", "mirco").retrieve().body(List.class);
         assertTrue(events.stream().map(Map.class::cast).anyMatch(e -> "RESOURCE_CONFLICT_DETECTED".equals(e.get("type"))
                 && "HIGH".equals(((Map<?, ?>)e.get("payload")).get("severity"))));
+    }
+
+    @Test
+    void resourceIntentDetectsDirectoryOverlapWithoutAlertingReadRead() {
+        post("mirco", "/projects/" + projectId + "/resource-intents", Map.of(
+                "workspaceId", mircoWorkspace, "agentId", mircoAgent, "resourceType", "DIRECTORY",
+                "resourcePath", "src/main", "intentType", "READ", "leaseSeconds", 600));
+        post("juan", "/projects/" + projectId + "/resource-intents", Map.of(
+                "workspaceId", juanWorkspace, "agentId", juanAgent, "resourceType", "FILE",
+                "resourcePath", "src/main/App.java", "intentType", "READ", "leaseSeconds", 600));
+        List<?> before = client.get().uri("/api/v1/projects/" + projectId + "/activity")
+                .header("X-Dev-User", "mirco").retrieve().body(List.class);
+        assertTrue(before.stream().map(Map.class::cast).noneMatch(e -> "RESOURCE_CONFLICT_DETECTED".equals(e.get("type"))));
+        post("juan", "/projects/" + projectId + "/resource-intents", Map.of(
+                "workspaceId", juanWorkspace, "agentId", juanAgent, "resourceType", "FILE",
+                "resourcePath", "src/main/Other.java", "intentType", "WRITE", "leaseSeconds", 600));
+        List<?> after = client.get().uri("/api/v1/projects/" + projectId + "/activity")
+                .header("X-Dev-User", "mirco").retrieve().body(List.class);
+        assertTrue(after.stream().map(Map.class::cast).anyMatch(e -> "RESOURCE_CONFLICT_DETECTED".equals(e.get("type"))
+                && "WARNING".equals(((Map<?, ?>) e.get("payload")).get("severity"))));
     }
 
     private Map<String, Object> intent(String workspace, String agent, String type) {
@@ -200,5 +267,27 @@ class ControlPlaneTest {
         assertEquals("OFFLINE", db.queryForObject("select status from workspace where id=?", String.class, UUID.fromString(mircoWorkspace)));
         post("mirco", "/workspaces/" + mircoWorkspace + "/heartbeat", Map.of());
         assertEquals("ONLINE", db.queryForObject("select status from workspace where id=?", String.class, UUID.fromString(mircoWorkspace)));
+    }
+
+    @Test
+    void sseReplaysCommittedEventsAfterReconnect() throws Exception {
+        String task = id(post("mirco", "/projects/" + projectId + "/tasks", Map.of("title", "Replay task")));
+        long taskEventId = db.queryForObject("select max(id) from activity_event where task_id=? and type='TASK_CREATED'",
+                Long.class, UUID.fromString(task));
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port +
+                "/api/v1/projects/" + projectId + "/events"))
+                .header("X-Dev-User", "mirco").header("Last-Event-ID", Long.toString(taskEventId - 1))
+                .header("Accept", "text/event-stream").GET().build();
+        HttpResponse<java.io.InputStream> response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofInputStream());
+        assertEquals(200, response.statusCode());
+        try (var body = response.body(); var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<String> event = executor.submit(() -> {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(body));
+                String line;
+                while ((line = reader.readLine()) != null) if (line.startsWith("data:") && line.contains("TASK_CREATED")) return line;
+                return "";
+            });
+            assertTrue(event.get(10, TimeUnit.SECONDS).contains(task));
+        }
     }
 }

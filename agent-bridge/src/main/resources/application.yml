@@ -9,3 +9,10 @@ bridge:
   owner-name: ${BRIDGE_OWNER_NAME:Local User}
   workspace-name: ${BRIDGE_WORKSPACE_NAME:local-pc}
   orchestrator-name: ${BRIDGE_ORCHESTRATOR_NAME:simulated-orchestrator}
+  oidc:
+    authorization-url: ${BRIDGE_OIDC_AUTHORIZATION_URL:}
+    token-url: ${BRIDGE_OIDC_TOKEN_URL:}
+    client-id: ${BRIDGE_OIDC_CLIENT_ID:}
+    redirect-uri: ${BRIDGE_OIDC_REDIRECT_URI:http://127.0.0.1:8765/callback}
+    scope: ${BRIDGE_OIDC_SCOPE:openid profile agent-orchestrator/api}
+    resource: ${BRIDGE_OIDC_RESOURCE:}
