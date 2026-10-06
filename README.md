@@ -55,6 +55,10 @@ En producción, el endpoint anuncia `/.well-known/oauth-protected-resource`; Cog
 
 La topología, variables, bootstrap, despliegue y rollback están documentados en `infra/README.md`. CloudFormation creó una URL HTTPS `*.cloudfront.net`, sin dominio propio. La cuenta personal usa el perfil `personal-AdminDev` en `us-east-1`. El repositorio todavía no está publicado en GitHub; CodeBuild usa un ZIP privado de S3 como fuente.
 
+## Licencia
+
+El código propio de este repositorio se distribuye bajo **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`). Véase [LICENSE](LICENSE). Las dependencias de terceros conservan sus respectivas licencias.
+
 ## Verificación
 
-`mvn test` usa PostgreSQL real en Testcontainers. Cubre permisos, claims concurrentes, propuestas, handoff, intents, SSE con `Last-Event-ID`, cliente MCP oficial y contrato HTTP MCP. Las plantillas CloudFormation se validan sin tocar una cuenta AWS mediante cfn-lint. La validación en dos réplicas, OAuth real de Cognito, clientes MCP externos y costes solo puede cerrarse durante el despliegue final.
+`mvn test` usa PostgreSQL real en Testcontainers. Cubre permisos, claims concurrentes, propuestas, handoff, intents, SSE con `Last-Event-ID`, cliente MCP oficial y contrato HTTP MCP. Las plantillas CloudFormation se validan sin tocar una cuenta AWS mediante cfn-lint. El despliegue se verificó con dos réplicas, OAuth real de Cognito, dos usuarios de prueba, REST, SSE y MCP. Los usuarios de prueba se eliminaron después de la auditoría.
