@@ -279,6 +279,9 @@ Resources:
       TargetType: ip
       HealthCheckPath: /actuator/health
       HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
       TargetGroupAttributes:
@@ -426,7 +429,7 @@ Resources:
       TaskDefinition: !Ref TaskDefinition
       DesiredCount: !Ref DesiredCount
       LaunchType: FARGATE
-      HealthCheckGracePeriodSeconds: 120
+      HealthCheckGracePeriodSeconds: 180
       DeploymentConfiguration:
         MinimumHealthyPercent: 50
         MaximumPercent: 200
