@@ -4,7 +4,7 @@ Control Plane para coordinar personas y agentes sobre un proyecto compartido. Po
 
 ## Estado
 
-El MVP local cubre el escenario de tres Bridges, claim atómico, dependencias y subtareas, intents con detección de solapamiento, propuestas con aprobación humana, mensajería y recuperación tras cortes SSE. Hay un panel mínimo de aprobación en `/`. El despliegue AWS está definido en dos stacks CloudFormation y una compilación CodeBuild, pero todavía no se ha aplicado en ninguna cuenta. La integración con Claude real sigue fuera del alcance de esta primera versión: los Bridges son simulados.
+El MVP local cubre el escenario de tres Bridges, claim atómico, dependencias y subtareas, intents con detección de solapamiento, propuestas con aprobación humana, mensajería y recuperación tras cortes SSE. Hay un panel mínimo de aprobación en `/`. El despliegue AWS está activo en `us-east-1` mediante dos stacks CloudFormation y CodeBuild, con URL pública `https://d3tlsuzwwbes8y.cloudfront.net`. La integración con Claude real sigue fuera del alcance de esta primera versión: los Bridges son simulados.
 
 ## Requisitos locales
 
@@ -53,7 +53,7 @@ En producción, el endpoint anuncia `/.well-known/oauth-protected-resource`; Cog
 
 ## AWS
 
-La topología, variables, bootstrap, despliegue y rollback están documentados en `infra/README.md`. CloudFormation crea una URL HTTPS `*.cloudfront.net`, sin dominio propio. El paso que usa la cuenta AWS personal se hará al final, después de fijar región, correo y presupuesto aceptable, callbacks MCP y perfil de AWS.
+La topología, variables, bootstrap, despliegue y rollback están documentados en `infra/README.md`. CloudFormation creó una URL HTTPS `*.cloudfront.net`, sin dominio propio. La cuenta personal usa el perfil `personal-AdminDev` en `us-east-1`. El repositorio todavía no está publicado en GitHub; CodeBuild usa un ZIP privado de S3 como fuente.
 
 ## Verificación
 

@@ -14,7 +14,8 @@ public class SecurityConfiguration {
     @Profile("!dev")
     SecurityFilterChain productionSecurity(HttpSecurity http,
             @Value("${app.security.public-base-url:}") String publicBaseUrl,
-            @Value("${app.security.required-scope:agent-orchestrator/api}") String requiredScope) throws Exception {
+            @Value("${app.security.required-scope:agent-orchestrator/api}") String requiredScope,
+            @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuer) throws Exception {
         return http.csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth.requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/", "/index.html", "/app.js", "/public/config",
@@ -27,7 +28,10 @@ public class SecurityConfiguration {
                     }
                     response.sendError(401);
                 }))
-                .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()))
+                .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults())
+                        .protectedResourceMetadata(metadata -> metadata.protectedResourceMetadataCustomizer(builder ->
+                                builder.resource(publicBaseUrl).authorizationServer(issuer).scope(requiredScope)
+                                        .tlsClientCertificateBoundAccessTokens(false))))
                 .build();
     }
 

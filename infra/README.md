@@ -2,24 +2,40 @@
 
 La arquitectura se define en dos stacks:
 
-1. `cloudformation/build.yaml`: repositorio ECR y proyecto CodeBuild con acceso al repositorio GitHub mediante una conexión AWS CodeConnections.
+1. `cloudformation/bootstrap-build.yaml`: bucket S3 privado para un ZIP de código, repositorio ECR y proyecto CodeBuild. Permite desplegar antes de publicar el repositorio en GitHub. `cloudformation/build.yaml` conserva la variante con conexión CodeConnections para la etapa posterior.
 2. `cloudformation/application.yaml`: VPC, dos subredes públicas para Fargate, dos subredes privadas para ALB y RDS PostgreSQL 17, CloudFront con dominio HTTPS de AWS, Cognito, ECS Fargate, Secrets Manager, CloudWatch y alerta de presupuesto.
 
-`buildspec.yml` construye el Dockerfile con Java 25, publica en ECR y usa los primeros 12 caracteres del commit como etiqueta inmutable. CloudFormation recibe esa etiqueta en `ImageTag`. El despliegue de aplicación se hace con un cambio explícito del stack después de revisar la compilación. Este flujo evita que un push aplique infraestructura o cambie producción sin revisión.
+`buildspec.yml` construye el Dockerfile con Java 25 y publica en ECR con los primeros 12 caracteres del commit como etiqueta inmutable. En el modo S3, la etiqueta se pasa a CodeBuild mediante `IMAGE_TAG_OVERRIDE`. CloudFormation recibe esa etiqueta en `ImageTag`. El despliegue de aplicación se hace con un cambio explícito del stack después de revisar la compilación. Este flujo evita que un push aplique infraestructura o cambie producción sin revisión.
 
 Los Bridges siguen en las PCs. CloudFront asigna una URL `https://...cloudfront.net` sin registrar dominio propio; conecta por un origen VPC al ALB privado. CloudFront no almacena respuestas de esta API y reenvía métodos, cabeceras, cookies y query strings, necesarios para OAuth, MCP y SSE. El Security Group de ECS solo acepta tráfico del ALB; RDS solo acepta tráfico de ECS. Las tareas tienen IP pública para salir a servicios AWS sin NAT Gateway, pero el puerto 8080 no queda abierto a Internet. RDS usa una sola instancia, cifrado, backup de siete días y protección contra borrado; no es Multi-AZ. El presupuesto envía una alerta al 80 % y no detiene gastos.
 
 ## Datos necesarios en la sesión final
 
 - Cuenta AWS, región y un perfil AWS CLI con permisos de CloudFormation, IAM, CodeBuild, CodeConnections, ECR, ECS, EC2/VPC, ELB, CloudFront, RDS, Cognito, Logs y Budgets. CloudFront VPC origins debe estar disponible en la región y en las zonas de disponibilidad elegidas.
-- Repositorio GitHub publicado y conexión CodeConnections autorizada para leerlo. Una conexión creada por CloudFormation queda pendiente hasta autorizarla; por eso el stack de build recibe un ARN ya activo.
+- ID regional de la prefix list administrada `com.amazonaws.global.cloudfront.origin-facing` para permitir que CloudFront llegue al ALB privado.
+- Para pasar al modo GitHub: repositorio publicado y conexión CodeConnections autorizada para leerlo. Una conexión creada por CloudFormation queda pendiente hasta autorizarla; por eso `build.yaml` recibe un ARN ya activo.
 - Presupuesto mensual y correo de alerta. La plantilla usa USD 10 como valor inicial; antes de aplicarla hay que comprobar si ya existe un presupuesto para evitar alertas duplicadas. La URL pública aparece en el output `PublicUrl` al crear el stack.
 - Callback URLs de los clientes MCP reales y usuarios para invitar a Cognito.
 - Revisión del coste regional en AWS Pricing Calculator antes de crear los stacks.
 
 ## Orden de creación
 
-Los comandos siguientes son una guía para la sesión con la cuenta. No se ejecutaron todavía. Sustituir los valores entre `<...>` y revisar cada change set de CloudFormation. Primero, publicar el repositorio GitHub y autorizar la conexión AWS CodeConnections para ese repositorio. Después, desde la raíz del proyecto:
+Para el arranque sin GitHub, desde la raíz del proyecto, crear el stack de build, comprimir el commit y ejecutar CodeBuild:
+
+```powershell
+aws cloudformation deploy --stack-name agent-orchestrator-build `
+  --template-file infra/cloudformation/bootstrap-build.yaml --capabilities CAPABILITY_IAM
+$sha = git rev-parse HEAD
+git archive --format=zip --output=work/deploy-source.zip HEAD
+$bucket = aws cloudformation describe-stacks --stack-name agent-orchestrator-build `
+  --query "Stacks[0].Outputs[?OutputKey=='SourceBucketName'].OutputValue | [0]" --output text
+aws s3 cp work/deploy-source.zip "s3://$bucket/source.zip"
+$tag = $sha.Substring(0, 12)
+aws codebuild start-build --project-name agent-orchestrator `
+  --environment-variables-override "name=IMAGE_TAG_OVERRIDE,value=$tag,type=PLAINTEXT"
+```
+
+Comprobar que el build terminó en `SUCCEEDED` y que ECR contiene la imagen. Para la variante futura con GitHub, publicar el repositorio y autorizar CodeConnections antes de crear el stack `build.yaml`:
 
 ```powershell
 aws cloudformation deploy --stack-name agent-orchestrator-build `
@@ -53,6 +69,7 @@ aws cloudformation deploy --stack-name agent-orchestrator-app `
     Name=agent-orchestrator `
     RepositoryUri=$repository `
     ImageTag=$tag `
+    CloudFrontPrefixListId=<prefix-list-id> `
     BudgetEmail=<correo> `
     BudgetLimitUsd=<monto> `
     McpCallbackUrls=<callback-1>,<callback-2>
