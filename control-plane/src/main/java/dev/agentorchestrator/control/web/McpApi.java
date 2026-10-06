@@ -88,7 +88,7 @@ public class McpApi {
             if (!(params.get("name") instanceof String name) || !name.equals(decoded(nameHeader)))
                 return error(HttpStatus.BAD_REQUEST, id, -32020, "Mcp-Name does not match request");
         }
-        // Authentication is enforced by Spring Security; Actor validates the signed JWT's client and token_use.
+        // Authentication is enforced by Spring Security; Actor validates OAuth JWTs or scoped MCP credentials.
         actor.sub();
         return switch (method) {
             case "server/discover" -> ok(id, Map.of("resultType", "complete", "supportedVersions", List.of(VERSION),

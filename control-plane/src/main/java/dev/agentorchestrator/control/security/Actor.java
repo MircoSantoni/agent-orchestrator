@@ -41,6 +41,8 @@ public class Actor {
             String value = request.getHeader("X-Dev-User");
             return value == null || value.isBlank() ? "local-user" : value;
         }
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof McpAccessTokens.Identity identity) return identity.sub();
         Jwt jwt = jwt();
         if (!"access".equals(jwt.getClaimAsString("token_use"))) throw ApiProblem.forbidden("Access token required");
         String clientId = jwt.getClaimAsString("client_id");

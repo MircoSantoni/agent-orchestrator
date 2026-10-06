@@ -3,8 +3,11 @@ package dev.agentorchestrator.control.security;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
+import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.beans.factory.annotation.Value;
 import java.util.Arrays;
@@ -14,8 +17,16 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 @Configuration
 public class SecurityConfiguration {
     @Bean
+    FilterRegistrationBean<McpTokenFilter> disableServletRegistration(McpTokenFilter filter) {
+        FilterRegistrationBean<McpTokenFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
     @Profile("!dev")
     SecurityFilterChain productionSecurity(HttpSecurity http,
+            McpTokenFilter mcpTokenFilter,
             @Value("${app.security.public-base-url:}") String publicBaseUrl,
             @Value("${app.security.required-scope:agent-orchestrator/api}") String requiredScope,
             @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuer) throws Exception {
@@ -31,10 +42,15 @@ public class SecurityConfiguration {
                     }
                     response.sendError(401);
                 }))
-                .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults())
+                .oauth2ResourceServer(oauth -> oauth.bearerTokenResolver(request -> {
+                            String token = new DefaultBearerTokenResolver().resolve(request);
+                            return "/mcp".equals(request.getServletPath()) && token != null && token.startsWith("ao_")
+                                    ? null : token;
+                        }).jwt(Customizer.withDefaults())
                         .protectedResourceMetadata(metadata -> metadata.protectedResourceMetadataCustomizer(builder ->
                                 builder.resource(publicBaseUrl).authorizationServer(issuer).scope(requiredScope)
                                         .tlsClientCertificateBoundAccessTokens(false))))
+                .addFilterBefore(mcpTokenFilter, BasicAuthenticationFilter.class)
                 .build();
     }
 

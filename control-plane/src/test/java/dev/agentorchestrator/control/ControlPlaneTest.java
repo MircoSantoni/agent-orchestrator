@@ -2,6 +2,8 @@ package dev.agentorchestrator.control;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -45,6 +47,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import dev.agentorchestrator.control.events.MaintenanceJobs;
 import dev.agentorchestrator.control.identity.UserDirectory;
+import dev.agentorchestrator.control.security.McpAccessTokens;
 
 @Testcontainers
 @ActiveProfiles("dev")
@@ -64,6 +67,7 @@ class ControlPlaneTest {
     @Value("${local.server.port}") int port;
     @Autowired JdbcTemplate db;
     @Autowired MaintenanceJobs jobs;
+    @Autowired McpAccessTokens mcpTokens;
     @MockitoBean UserDirectory users;
     RestClient client;
     String projectId;
@@ -376,6 +380,19 @@ class ControlPlaneTest {
     private Map<String, Object> intent(String workspace, String agent, String type) {
         return Map.of("workspaceId", workspace, "agentId", agent, "resourceType", "FILE",
                 "resourcePath", "src/SecurityConfig.java", "intentType", type, "leaseSeconds", 600);
+    }
+
+    @Test
+    void mcpCredentialIsScopedToOwnerAndRevocable() {
+        Map<?, ?> created = post("mirco", "/me/mcp-tokens", Map.of("name", "Claude de Mirco"));
+        String secret = created.get("token").toString();
+        UUID tokenId = UUID.fromString(created.get("id").toString());
+        assertEquals("mirco", mcpTokens.authenticate(secret).sub());
+        assertNull(mcpTokens.authenticate(secret + "x"));
+        assertNotNull(db.queryForObject("SELECT secret_hash FROM mcp_access_token WHERE id = ?", byte[].class, tokenId));
+        assertEquals(0, db.queryForObject("SELECT count(*) FROM mcp_access_token WHERE id = ? AND owner_sub = ?", Integer.class, tokenId, "juan"));
+        client.delete().uri("/api/v1/me/mcp-tokens/" + tokenId).header("X-Dev-User", "mirco").retrieve().toBodilessEntity();
+        assertNull(mcpTokens.authenticate(secret));
     }
 
     @Test

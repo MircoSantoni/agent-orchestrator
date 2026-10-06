@@ -6,7 +6,7 @@ Control Plane para coordinar personas y agentes sobre un proyecto compartido. Po
 
 ## Estado
 
-El MVP cubre claim atómico, dependencias y subtareas, intents con detección de solapamiento, propuestas con aprobación humana y mensajería. El panel permite crear organizaciones, proyectos, tareas, contexto y mensajes; también muestra la red de workspaces y el flujo de servicios. El despliegue AWS está activo en `us-east-1` mediante dos stacks CloudFormation y CodeBuild, con URL pública `https://d3tlsuzwwbes8y.cloudfront.net`. Un cliente con MCP remoto y OAuth puede conectarse directamente: el Bridge local es opcional. El servidor coordina agentes, pero no ejecuta modelos por sí mismo.
+El MVP cubre claim atómico, dependencias y subtareas, intents con detección de solapamiento, propuestas con aprobación humana y mensajería. El panel permite crear organizaciones, proyectos, tareas, contexto y mensajes; también muestra la red de workspaces y el flujo de servicios. El despliegue AWS está activo en `us-east-1` mediante dos stacks CloudFormation y CodeBuild, con URL pública `https://d3tlsuzwwbes8y.cloudfront.net`. Claude puede conectarse directamente al MCP remoto con una credencial personal revocable; el Bridge local es opcional. El servidor coordina agentes, pero no ejecuta modelos por sí mismo.
 
 ## Requisitos locales
 
@@ -51,7 +51,7 @@ En producción, Spring valida la firma JWT mediante el JWKS del issuer OIDC, emi
 
 `POST /mcp` soporta la negociación `2025-11-25` (`initialize`, `tools/list`, `tools/call`) y el subconjunto stateless `2026-07-28` (`server/discover`, `tools/list`, `tools/call`). La versión 2025 se verificó con `io.modelcontextprotocol.sdk:mcp:2.0.1`; la versión 2026 tiene pruebas de protocolo HTTP. Un agente remoto puede usar `list_projects` y `connect_agent` para registrarse sin instalar este repositorio, descubrir workspaces y tareas, mantener presencia, reclamar/iniciar/completar tareas, intercambiar mensajes y proponer contexto. Ninguna herramienta permite aprobar propuestas.
 
-En producción, el endpoint anuncia `/.well-known/oauth-protected-resource`; Cognito funciona como authorization server. El cliente MCP debe registrar previamente su callback en `mcp_callback_urls`, usar Authorization Code + PKCE y pedir el scope y resource publicados. El cliente debe conservar y renovar sus credenciales según su implementación. Las capacidades MCP se limitan a herramientas; no hay recursos, prompts, sesiones ni servidor de autorización propio. Los clientes web con `Origin` requieren inclusión exacta en `APP_MCP_ALLOWED_ORIGINS`.
+En producción, el panel crea credenciales personales de 256 bits para MCP. Solo se almacena su hash, expiran a los 90 días, se pueden revocar y únicamente se aceptan en `/mcp`; cada operación sigue comprobando membresía y ownership. Claude puede enviarlas en el encabezado `Authorization: Bearer`. El endpoint también anuncia `/.well-known/oauth-protected-resource` para clientes OAuth compatibles con el callback estático de Cognito. Las capacidades MCP se limitan a herramientas; no hay recursos, prompts, sesiones ni servidor de autorización propio. Los clientes web con `Origin` requieren inclusión exacta en `APP_MCP_ALLOWED_ORIGINS`.
 
 ## AWS
 

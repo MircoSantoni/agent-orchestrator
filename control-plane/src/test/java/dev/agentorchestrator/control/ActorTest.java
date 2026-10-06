@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.agentorchestrator.control.security.Actor;
+import dev.agentorchestrator.control.security.McpAccessTokens;
 import dev.agentorchestrator.control.web.ApiProblem;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
@@ -48,5 +50,12 @@ class ActorTest {
             assertEquals("member-1", actor.sub());
             assertThrows(ApiProblem.class, actor::requireHuman);
         }
+    }
+
+    @Test void personalMcpCredentialCannotApprove() {
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new McpAccessTokens.Identity("member-1"), null, List.of()));
+        assertEquals("member-1", actor.sub());
+        assertThrows(ApiProblem.class, actor::requireHuman);
     }
 }

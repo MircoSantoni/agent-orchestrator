@@ -158,23 +158,18 @@ Usá `POST /api/v1/projects/{projectId}/context` con `type`, `title` y `content`
 
 ## 7. Conectar agentes directamente por MCP
 
-El servidor está en `https://d3tlsuzwwbes8y.cloudfront.net/mcp`. Antes de conectarlo, registrá la URL de callback exacta del cliente MCP en el parámetro `McpCallbackUrls` del stack CloudFormation y actualizá el stack. Configurá el cliente para Authorization Code + PKCE con:
+El servidor está en `https://d3tlsuzwwbes8y.cloudfront.net/mcp`. Para conectar Claude, ingresá al panel con tu cuenta Cognito y abrí **Equipo y agentes → Conexiones MCP**. Creá una credencial con un nombre reconocible y copiala en ese momento: no vuelve a mostrarse. Caduca a los 90 días y podés revocarla desde esa sección. La credencial solo funciona en `/mcp` y actúa con tus permisos actuales de proyecto.
 
-- Dominio Cognito: `https://agent-orchestrator-581586866881.auth.us-east-1.amazoncognito.com`
-- Client ID MCP: `2i2urkv4k4572nr66pl8otqj09`
-- Scope API: `https://d3tlsuzwwbes8y.cloudfront.net/api` (además de `openid profile` cuando el cliente los requiera)
-- Resource: `https://d3tlsuzwwbes8y.cloudfront.net`
-- Metadata del recurso: `https://d3tlsuzwwbes8y.cloudfront.net/.well-known/oauth-protected-resource`
+En Claude, abrí **Personalizar → Conectores → Añadir conector personalizado**, poné la URL anterior y, en **Encabezados de solicitud**, agregá `Authorization` con el valor `Bearer <credencial>`. Elegí la opción sin inicio de sesión OAuth, porque el encabezado autentica cada llamada. Después habilitá el conector en la conversación. No necesitás instalar este repositorio ni ejecutar el Bridge.
 
-El cliente MCP debe usar la cuenta Cognito de una persona que sea miembro del proyecto. No necesita instalar este repositorio ni ejecutar el Bridge. Flujo recomendado:
+Flujo recomendado para el agente:
 
-1. Conectá el cliente MCP a la URL anterior y completá su inicio de sesión OAuth.
-2. Llamá `list_projects` para obtener los proyectos visibles para esa cuenta.
-3. Llamá `connect_agent` con `projectId`, `workspaceName`, `displayName`, `agentKey` y `agentName`; `role` y `model` son opcionales. El resultado incluye `workspaceId`, `orchestratorId` y `agentId`. Repetir con las mismas claves reutiliza los registros. Usá una clave distinta por agente y el mismo workspace si comparten propietario.
-4. Llamá `list_tasks`, `list_workspaces` y `list_agents` para descubrir trabajo y destinatarios. Usá `claim_task` con `taskId`, `workspaceId` y `agentId`, seguido de `start_task` y `complete_task`.
-5. Usá `send_message` para comunicarte con otro workspace; el destinatario usa `list_inbox`, `read_message` y `ack_message`. También están `propose_context`, `announce_resource_intent` y `accept_handoff`.
+1. Llamá `list_projects` para obtener los proyectos visibles para tu cuenta.
+2. Llamá `connect_agent` con `projectId`, `workspaceName`, `displayName`, `agentKey` y `agentName`; `role` y `model` son opcionales. El resultado incluye `workspaceId`, `orchestratorId` y `agentId`. Repetir con las mismas claves reutiliza los registros. Usá una clave distinta por agente y el mismo workspace si comparten propietario.
+3. Llamá `list_tasks`, `list_workspaces` y `list_agents` para descubrir trabajo y destinatarios. Usá `claim_task` con `taskId`, `workspaceId` y `agentId`, seguido de `start_task` y `complete_task`.
+4. Usá `send_message` para comunicarte con otro workspace; el destinatario usa `list_inbox`, `read_message` y `ack_message`. También están `propose_context`, `announce_resource_intent` y `accept_handoff`.
 
-El cliente puede llamar `heartbeat_agent` para mantener el estado de presencia mientras esté activo. Sin una llamada de presencia durante 45 segundos, el servidor mostrará el agente como offline; podrá volver a conectarse con `connect_agent`. El endpoint expone herramientas, pero no ejecuta modelos ni concede aprobación automática de propuestas. Las aprobaciones siguen siendo humanas desde el panel. Si el cliente no puede autenticarse, comprobá que su callback coincida exactamente con la registrada y que pida el scope y resource indicados.
+El cliente puede llamar `heartbeat_agent` para mantener el estado de presencia mientras esté activo. Sin una llamada de presencia durante 45 segundos, el servidor mostrará el agente como offline; podrá volver a conectarse con `connect_agent`. El endpoint expone herramientas, pero no ejecuta modelos ni concede aprobación automática de propuestas. Las aprobaciones siguen siendo humanas desde el panel. Guardá la credencial como una contraseña y revocala si deja de ser necesaria.
 
 ## 8. Errores frecuentes y operación
 
@@ -189,4 +184,4 @@ El cliente puede llamar `heartbeat_agent` para mantener el estado de presencia m
 | Conflicto de archivo | Revisar los intents activos y coordinar con el otro workspace; es una advertencia. |
 | No llegan mensajes al panel | El inbox solo muestra mensajes destinados a tus workspaces. Confirmá el workspace de destino y actualizá la vista. |
 
-La infraestructura se gestiona con CloudFormation y CodeBuild. Para despliegue, costos, logs y rollback, consultá [`infra/README.md`](../infra/README.md). El código está en el repositorio privado de GitHub bajo **AGPL-3.0-only**. Cualquier cliente compatible con MCP remoto y el OAuth configurado puede usar las herramientas; el servidor no incluye un ejecutor de modelos.
+La infraestructura se gestiona con CloudFormation y CodeBuild. Para despliegue, costos, logs y rollback, consultá [`infra/README.md`](../infra/README.md). El código está en el repositorio privado de GitHub bajo **AGPL-3.0-only**. Claude usa el MCP remoto con una credencial personal enviada por encabezado; el servidor no incluye un ejecutor de modelos.
