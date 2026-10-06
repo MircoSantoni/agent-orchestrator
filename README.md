@@ -4,7 +4,7 @@ Control Plane para coordinar personas y agentes sobre un proyecto compartido. Po
 
 ## Estado
 
-El MVP local cubre el escenario de tres Bridges, claim atómico, dependencias y subtareas, intents con detección de solapamiento, propuestas con aprobación humana, mensajería y recuperación tras cortes SSE. Hay un panel mínimo de aprobación en `/`. El despliegue AWS está preparado en `infra/terraform`, pero todavía no se ha aplicado en ninguna cuenta. La integración con Claude real sigue fuera del alcance de esta primera versión: los Bridges son simulados.
+El MVP local cubre el escenario de tres Bridges, claim atómico, dependencias y subtareas, intents con detección de solapamiento, propuestas con aprobación humana, mensajería y recuperación tras cortes SSE. Hay un panel mínimo de aprobación en `/`. El despliegue AWS está definido en dos stacks CloudFormation y una compilación CodeBuild, pero todavía no se ha aplicado en ninguna cuenta. La integración con Claude real sigue fuera del alcance de esta primera versión: los Bridges son simulados.
 
 ## Requisitos locales
 
@@ -57,4 +57,4 @@ La topología, variables, bootstrap, despliegue y rollback están documentados e
 
 ## Verificación
 
-`mvn test` usa PostgreSQL real en Testcontainers. Cubre permisos, claims concurrentes, propuestas, handoff, intents, SSE con `Last-Event-ID`, cliente MCP oficial y contrato HTTP MCP. `terraform fmt -check -recursive`, `terraform init -backend=false` y `terraform validate` comprueban la plantilla sin tocar una cuenta AWS. La validación en dos réplicas, OAuth real de Cognito, clientes MCP externos y costes solo puede cerrarse durante el despliegue final.
+`mvn test` usa PostgreSQL real en Testcontainers. Cubre permisos, claims concurrentes, propuestas, handoff, intents, SSE con `Last-Event-ID`, cliente MCP oficial y contrato HTTP MCP. Las plantillas CloudFormation se validan sin tocar una cuenta AWS mediante cfn-lint. La validación en dos réplicas, OAuth real de Cognito, clientes MCP externos y costes solo puede cerrarse durante el despliegue final.

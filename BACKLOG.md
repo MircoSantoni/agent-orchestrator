@@ -5,7 +5,7 @@
 - M0: base Java 25 / Spring Boot 4.1, PostgreSQL, Flyway, Docker y Testcontainers operativos.
 - M1: primer demo local verificado con dos Bridges simulados, conflicto WRITE/WRITE y mensaje recibido por SSE.
 - M2: escenario manual con tres Bridges, propuesta aprobada por otra persona y handoff a subtarea verificado. También quedaron implementados heartbeats de agentes, resincronización REST tras SSE, intents con solapamiento de paths, UI mínima de aprobación, Cognito PKCE para humano/Bridge y autorización JWT por audience/scope/cliente. Se agregaron pruebas de SSE y compatibilidad con el SDK Java MCP 2.0.1.
-- M3: infraestructura Terraform validada localmente. Aplicación en AWS pendiente de región, dominio, presupuesto, callbacks MCP y acceso a la cuenta personal. Las pruebas con Cognito real, clientes MCP externos y dos réplicas pertenecen a ese cierre.
+- M3: stacks CloudFormation y compilación CodeBuild preparados localmente. Aplicación en AWS pendiente de región, dominio, presupuesto, callbacks MCP, repositorio GitHub y acceso a la cuenta personal. Las pruebas con Cognito real, clientes MCP externos y dos réplicas pertenecen a ese cierre.
 
 ## Objetivo
 
@@ -130,7 +130,7 @@ Coordinar por Internet a varias personas, cada una con su propio orquestador y a
 
 ## Pendientes para el cierre en AWS
 
-1. Elegir región, dominio/Hosted Zone, presupuesto y correo de alerta; calcular coste regional antes de aplicar Terraform.
-2. Crear el backend S3 de estado, revisar el plan, publicar la imagen inmutable y aplicar la infraestructura con la cuenta personal.
+1. Elegir región, dominio/Hosted Zone, presupuesto y correo de alerta; calcular coste regional antes de crear los stacks CloudFormation.
+2. Conectar GitHub con AWS CodeConnections, crear el stack de build, compilar y publicar la imagen con CodeBuild; revisar y crear el stack de aplicación con la cuenta personal.
 3. Crear usuarios de Cognito por invitación administrativa, registrar callbacks MCP concretos y completar pruebas OAuth y MCP desde clientes externos.
 4. Verificar health checks, logs, SSE y resincronización con dos tareas ECS, más el flujo E2E de tres Bridges contra el servicio público.

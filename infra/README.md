@@ -1,60 +1,71 @@
-# Despliegue AWS del Control Plane
+# Despliegue AWS con CloudFormation y CodeBuild
 
-La plantilla `terraform/` prepara un servicio nativo cloud: ALB público con HTTPS, dos tareas ECS Fargate sin estado en zonas de disponibilidad distintas, RDS PostgreSQL 17 en subredes privadas, Cognito para clientes públicos, ECR, Secrets Manager, CloudWatch y alerta de presupuesto. Los Bridges siguen ejecutándose en las PCs. El Security Group de ECS solo acepta tráfico del ALB; RDS solo acepta tráfico de ECS. Las tareas tienen IP pública para salir a servicios AWS sin NAT Gateway, pero el puerto de la aplicación no queda abierto a Internet.
+La arquitectura se define en dos stacks:
 
-Esto todavía no se ha aplicado en la cuenta personal. El presupuesto es una alerta, no un límite de gasto. Dos tareas, ALB y RDS generan costes continuos; la estimación concreta depende de región y opciones elegidas y debe revisarse en AWS Pricing Calculator antes de aplicar. RDS tiene backup de 7 días, cifrado y protección contra borrado, pero esta configuración inicial usa una sola instancia y no es Multi-AZ.
+1. `cloudformation/build.yaml`: repositorio ECR y proyecto CodeBuild con acceso al repositorio GitHub mediante una conexión AWS CodeConnections.
+2. `cloudformation/application.yaml`: VPC, dos subredes públicas para ALB/Fargate, dos subredes privadas para RDS PostgreSQL 17, Cognito, certificado ACM, DNS Route 53, ECS Fargate, Secrets Manager, CloudWatch y alerta de presupuesto.
 
-## Datos necesarios para el cierre con la cuenta
+`buildspec.yml` construye el Dockerfile con Java 25, publica en ECR y usa los primeros 12 caracteres del commit como etiqueta inmutable. CloudFormation recibe esa etiqueta en `ImageTag`. El despliegue de aplicación se hace con un cambio explícito del stack después de revisar la compilación. Este flujo evita que un push aplique infraestructura o cambie producción sin revisión.
 
-1. Región AWS y dominio administrado en Route 53, más su Hosted Zone ID.
-2. Perfil AWS CLI con permisos para Terraform, ECR, ECS, EC2/VPC, ELB, ACM, RDS, Cognito, IAM, CloudWatch, Budgets, S3 y Secrets Manager.
-3. Nombre de bucket S3 privado para el estado de Terraform; crearlo con versionado, cifrado y bloqueo de acceso público antes de inicializar.
-4. Correo para alertas, presupuesto mensual aceptable y callbacks de los clientes MCP que se usarán.
-5. Usuarios a invitar y estrategia de alta en Cognito. El user pool permite solo usuarios creados por un administrador.
+Los Bridges siguen en las PCs. El Security Group de ECS solo acepta tráfico del ALB; RDS solo acepta tráfico de ECS. Las tareas tienen IP pública para salir a servicios AWS sin NAT Gateway, pero el puerto 8080 no queda abierto a Internet. RDS usa una sola instancia, cifrado, backup de siete días y protección contra borrado; no es Multi-AZ. El presupuesto envía una alerta al 80 % y no detiene gastos.
 
-## Bootstrap y despliegue
+## Datos necesarios en la sesión final
 
-Los comandos siguientes son el procedimiento para la sesión final en la cuenta AWS. Requieren AWS CLI, Terraform y Docker además de Java 25/Maven. Revisar el plan antes del `apply`.
+- Cuenta AWS, región y un perfil AWS CLI con permisos de CloudFormation, IAM, CodeBuild, CodeConnections, ECR, ECS, EC2/VPC, ELB, ACM, Route 53, RDS, Cognito, Logs y Budgets.
+- Repositorio GitHub publicado y conexión CodeConnections autorizada para leerlo. Una conexión creada por CloudFormation queda pendiente hasta autorizarla; por eso el stack de build recibe un ARN ya activo.
+- Dominio con Hosted Zone pública de Route 53 en la cuenta, presupuesto mensual y correo de alerta.
+- Callback URLs de los clientes MCP reales y usuarios para invitar a Cognito.
+- Revisión del coste regional en AWS Pricing Calculator antes de crear los stacks.
 
-```powershell
-cd infra/terraform
-Copy-Item terraform.tfvars.example terraform.tfvars
-Copy-Item backend.hcl.example backend.hcl
-# Editar ambos archivos con región, DNS, bucket y callbacks reales.
-terraform init -backend-config=backend.hcl
-terraform fmt -check -recursive
-terraform validate
-terraform plan -out=preparacion.tfplan
-```
+## Orden de creación
 
-El repositorio ECR debe existir antes de publicar la imagen. Se puede crear de forma controlada con `terraform apply -target=aws_ecr_repository.app` dentro de `infra/terraform` después de revisar el recurso, seguido de un plan completo. Volvé a la raíz del proyecto para construir la imagen:
+Los comandos siguientes son una guía para la sesión con la cuenta. No se ejecutaron todavía. Sustituir los valores entre `<...>` y revisar cada change set de CloudFormation. Primero, publicar el repositorio GitHub y autorizar la conexión AWS CodeConnections para ese repositorio. Después, desde la raíz del proyecto:
 
 ```powershell
-mvn test
-mvn package -DskipTests
-$imageTag = (git rev-parse --short=12 HEAD)
-docker build -f Dockerfile -t agent-orchestrator:$imageTag .
-$repository = (terraform -chdir=infra/terraform output -raw ecr_repository_url)
-$registry = $repository.Split('/')[0]
-aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin $registry
-docker tag agent-orchestrator:$imageTag "${repository}:${imageTag}"
-docker push "${repository}:${imageTag}"
+aws cloudformation deploy --stack-name agent-orchestrator-build `
+  --template-file infra/cloudformation/build.yaml `
+  --capabilities CAPABILITY_IAM `
+  --parameter-overrides `
+    Name=agent-orchestrator `
+    GitHubRepositoryUrl=https://github.com/<usuario>/agent-orchestrator.git `
+    GitHubBranch=main `
+    ConnectionArn=<arn-de-conexion-activa>
 ```
 
-Fijar `image_tag` al mismo commit, ejecutar `terraform plan`, revisar coste/recursos y luego `terraform apply`. La primera puesta en marcha puede tardar por el certificado ACM, RDS y health checks. Verificar:
+Iniciar CodeBuild con el SHA completo del commit que se quiere desplegar y esperar `SUCCEEDED`:
 
-- `https://<dominio>/actuator/health` devuelve 200.
-- `https://<dominio>/.well-known/oauth-protected-resource` publica resource, issuer y scope.
-- El panel humano inicia sesión por Cognito y puede aprobar una propuesta de prueba.
-- Un Bridge fuera de AWS obtiene token PKCE, se registra y recibe eventos SSE.
-- Dos Bridges conectados a réplicas distintas recuperan estado por REST tras reconexión.
-- Un cliente MCP con callback registrado descubre herramientas y llama `list_tasks` y `claim_task`.
-- CloudWatch muestra logs estructurados y no hay errores de Flyway ni fallos de health check.
+```powershell
+$sha = (git rev-parse HEAD)
+aws codebuild start-build --project-name agent-orchestrator --source-version $sha
+aws codebuild batch-get-builds --ids <build-id>
+$tag = $sha.Substring(0, 12)
+$repository = aws cloudformation describe-stacks --stack-name agent-orchestrator-build `
+  --query "Stacks[0].Outputs[?OutputKey=='RepositoryUri'].OutputValue | [0]" --output text
+```
 
-## Actualización y rollback
+Revisar los parámetros, crear un change set y desplegar el stack de aplicación con la imagen publicada:
 
-Publicar cada versión con un tag de imagen inmutable, cambiar `image_tag` y aplicar un plan nuevo. Para rollback, volver al tag anterior y reaplicar. Las migraciones Flyway deben ser compatibles hacia atrás con la versión previa antes de hacer rollback. RDS crea backups automáticos de 7 días y una snapshot final al destruir; la restauración de base de datos es una operación separada. No ejecutar `terraform destroy` como procedimiento de rollback.
+```powershell
+aws cloudformation deploy --stack-name agent-orchestrator-app `
+  --template-file infra/cloudformation/application.yaml `
+  --capabilities CAPABILITY_IAM `
+  --parameter-overrides `
+    Name=agent-orchestrator `
+    DomainName=<dominio> `
+    HostedZoneId=<zone-id> `
+    RepositoryUri=$repository `
+    ImageTag=$tag `
+    BudgetEmail=<correo> `
+    BudgetLimitUsd=<monto> `
+    McpCallbackUrls=<callback-1>,<callback-2>
+```
 
-## Límites de la plantilla
+Para la revisión previa, usar `aws cloudformation create-change-set` y `describe-change-set` con los mismos parámetros antes de ejecutar `deploy`. Crear usuarios mediante la consola/CLI de Cognito; el user pool solo permite alta administrativa.
 
-La plantilla no habilita alarmas de latencia/error, WAF, Multi-AZ de RDS, rotación automática de credenciales de la base ni pipeline de CI/CD. La política de IAM para despliegues y el coste regional se revisarán con la cuenta real. El estado S3 debe mantenerse fuera del repositorio y protegido por políticas propias del bucket.
+## Verificación y actualización
+
+Verificar `/actuator/health`, metadatos OAuth en `/.well-known/oauth-protected-resource`, login PKCE del panel y Bridge, permisos por proyecto, un cliente MCP real, logs CloudWatch y SSE/reconexión con dos tareas ECS. La primera creación puede esperar la validación DNS del certificado y el arranque de RDS.
+
+Para una versión nueva, ejecutar CodeBuild con un commit nuevo, comprobar que la imagen existe en ECR y actualizar `ImageTag` en el stack de aplicación. Para rollback, desplegar el tag anterior. Las migraciones Flyway deben ser compatibles con la versión anterior si se necesita ese rollback. La base de datos tiene backup automático y política Snapshot al eliminar el recurso, pero la restauración es una operación separada.
+
+La validación local con `cfn-lint` confirma sintaxis y tipos de recursos; la creación y el comportamiento de AWS se verificarán únicamente con la cuenta final. La plantilla no incluye WAF, Multi-AZ de RDS, rotación automática de credenciales, alarmas de latencia/error ni un pipeline de despliegue automático.
