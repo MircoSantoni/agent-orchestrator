@@ -4,6 +4,8 @@ Control Plane para coordinar personas y agentes sobre un proyecto compartido. Po
 
 **Manual de uso:** [docs/manual-uso.md](docs/manual-uso.md), con acceso al despliegue, alta inicial, panel, Bridge, mensajería, tareas, contexto y MCP.
 
+**Claude Code en un workspace existente:** [docs/claude-code-workspace-existente.md](docs/claude-code-workspace-existente.md), con instalación, vínculo del agente y prueba de mensajes.
+
 ## Estado
 
 El MVP cubre claim atómico, dependencias y subtareas, intents con detección de solapamiento, propuestas con aprobación humana y mensajería. El panel permite crear organizaciones, proyectos, tareas, contexto y mensajes; también muestra la red de workspaces y el flujo de servicios. El despliegue AWS está activo en `us-east-1` mediante dos stacks CloudFormation y CodeBuild, con URL pública `https://d3tlsuzwwbes8y.cloudfront.net`. Claude puede conectarse directamente al MCP remoto con una credencial personal revocable. El Bridge y el supervisor local para Claude Code son opcionales; el servidor cloud no ejecuta modelos por sí mismo.
