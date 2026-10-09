@@ -85,11 +85,12 @@ Para una versión nueva, ejecutar CodeBuild con un commit nuevo, comprobar que l
 
 La validación local con `cfn-lint` confirma sintaxis y tipos de recursos. La plantilla no incluye WAF, Multi-AZ de RDS, rotación automática de credenciales, alarmas de latencia/error ni un pipeline de despliegue automático.
 
-## Despliegue realizado el 6 de octubre de 2026
+## Despliegue actualizado el 9 de octubre de 2026
 
 - Región `us-east-1`, stacks `agent-orchestrator-build` y `agent-orchestrator-app`.
 - URL pública: `https://d3tlsuzwwbes8y.cloudfront.net`; MCP: `https://d3tlsuzwwbes8y.cloudfront.net/mcp`.
-- La imagen de aplicación activa se publicó en ECR con tag `acc088eac12c` (gestión de workspaces y tareas por MCP, mensajes completos visibles para miembros del proyecto).
+- La imagen de aplicación activa se publicó en ECR con tag `86b3141e188d`. Incluye recursos MCP de inbox, `subscriptions/listen` y el paquete descargable `workspace-mcp` para el supervisor local opcional de Claude Code. El tag anterior para rollback es `acc088eac12c`.
 - Build desde ZIP privado de S3. El repositorio está en GitHub; CodeConnections sigue pendiente de vincular si se desea que los builds se inicien desde commits remotos.
 - El pool Cognito solo permite usuarios creados por administración. Las primeras cuentas se crearon en octubre de 2026; desde esta versión, los administradores de proyecto pueden invitar por correo desde el panel. Las callback URLs de clientes MCP reales aún deben configurarse según el cliente elegido.
 - El stack usa la prefix list `pl-3b927c52` para permitir tráfico de CloudFront al ALB privado. Sin esa regla, las solicitudes públicas quedan esperando hasta timeout.
+- La actualización de CloudFormation modificó únicamente `Service` y reemplazó `TaskDefinition`. ECS quedó estable con dos tareas en la revisión 12. Se comprobaron `/actuator/health` (`UP`), la descarga y contenido del paquete, y el rechazo `401` de `/mcp` sin credencial.
