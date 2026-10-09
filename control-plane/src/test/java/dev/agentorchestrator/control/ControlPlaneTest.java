@@ -146,9 +146,71 @@ class ControlPlaneTest {
         try (var sdk = McpClient.sync(transport).build()) {
             assertEquals("2025-11-25", sdk.initialize().protocolVersion());
             assertTrue(sdk.listTools().tools().stream().anyMatch(t -> "list_tasks".equals(t.name())));
+            assertTrue(sdk.listResources().resources().stream().anyMatch(r ->
+                    ("workspace://" + mircoWorkspace + "/inbox").equals(r.uri())));
             var result = sdk.callTool(new McpSchema.CallToolRequest("list_tasks", Map.of("projectId", projectId)));
             assertEquals(false, result.isError());
         }
+    }
+
+    @Test
+    void mcpInboxResourcesNotifyAndCanBeReadAfterReconnect() throws Exception {
+        String workspaceUri = "workspace://" + mircoWorkspace + "/inbox";
+        String agentUri = "agent://" + mircoAgent + "/inbox";
+        Map<?, ?> resources = (Map<?, ?>) mcp("mirco", "resources/list", null, Map.of()).get("result");
+        List<?> listed = (List<?>) resources.get("resources");
+        assertTrue(listed.stream().map(Map.class::cast).anyMatch(item -> workspaceUri.equals(item.get("uri"))));
+        assertTrue(listed.stream().map(Map.class::cast).anyMatch(item -> agentUri.equals(item.get("uri"))));
+        assertTrue(listed.stream().map(Map.class::cast).noneMatch(item ->
+                ("workspace://" + juanWorkspace + "/inbox").equals(item.get("uri"))));
+
+        String request = "{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"subscriptions/listen\",\"params\":{"
+                + "\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\","
+                + "\"io.modelcontextprotocol/clientCapabilities\":{}},"
+                + "\"notifications\":{\"resourceSubscriptions\":[\"" + workspaceUri + "\"]}}}";
+        HttpRequest httpRequest = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/mcp"))
+                .header("X-Dev-User", "mirco").header("MCP-Protocol-Version", "2026-07-28")
+                .header("Mcp-Method", "subscriptions/listen").header("Content-Type", "application/json")
+                .header("Accept", "text/event-stream").POST(HttpRequest.BodyPublishers.ofString(request)).build();
+        try (HttpClient http = HttpClient.newHttpClient(); var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            HttpResponse<java.io.InputStream> response = http.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofInputStream())
+                    .get(10, TimeUnit.SECONDS);
+            assertEquals(200, response.statusCode());
+            try (var stream = response.body(); var reader = new BufferedReader(new InputStreamReader(stream))) {
+                assertTrue(executor.submit(() -> nextSseData(reader)).get(10, TimeUnit.SECONDS)
+                        .contains("notifications/subscriptions/acknowledged"));
+                String messageId = id(post("juan", "/projects/" + projectId + "/messages", Map.of(
+                        "fromWorkspaceId", juanWorkspace, "toWorkspaceId", mircoWorkspace,
+                        "toAgentId", mircoAgent, "type", "REVIEW_REQUEST", "body", "Review this")));
+                assertTrue(executor.submit(() -> nextSseData(reader)).get(10, TimeUnit.SECONDS)
+                        .contains("notifications/resources/updated"));
+                Map<?, ?> read = mcpReadResource("mirco", workspaceUri);
+                assertTrue(read.toString().contains(messageId));
+                assertTrue(mcpReadResource("mirco", agentUri).toString().contains(messageId));
+                assertEquals(403, assertThrows(RestClientResponseException.class, () ->
+                        mcpReadResource("juan", workspaceUri)).getStatusCode().value());
+            }
+            String offlineMessage = id(post("juan", "/projects/" + projectId + "/messages", Map.of(
+                    "fromWorkspaceId", juanWorkspace, "toWorkspaceId", mircoWorkspace,
+                    "type", "HELP_REQUEST", "body", "Arrived while offline")));
+            assertTrue(mcpReadResource("mirco", workspaceUri).toString().contains(offlineMessage));
+        }
+    }
+
+    private Map<?, ?> mcpReadResource(String user, String uri) {
+        return client.post().uri("/mcp").header("X-Dev-User", user)
+                .header("MCP-Protocol-Version", "2026-07-28").header("Mcp-Method", "resources/read")
+                .header("Mcp-Name", uri).contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("jsonrpc", "2.0", "id", 2, "method", "resources/read", "params", Map.of(
+                        "uri", uri, "_meta", Map.of("io.modelcontextprotocol/protocolVersion", "2026-07-28",
+                                "io.modelcontextprotocol/clientCapabilities", Map.of()))))
+                .retrieve().body(Map.class);
+    }
+
+    private String nextSseData(BufferedReader reader) throws Exception {
+        String line;
+        while ((line = reader.readLine()) != null) if (line.startsWith("data:")) return line;
+        throw new IllegalStateException("Subscription ended before a data frame");
     }
 
     @Test

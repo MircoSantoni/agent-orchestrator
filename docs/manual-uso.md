@@ -1,6 +1,6 @@
 # Manual de uso — Agent Orchestrator MVP
 
-Actualizado: 6 de octubre de 2026. Este manual describe la versión desplegada en AWS y el Bridge simulado incluido en el repositorio.
+Actualizado: 9 de octubre de 2026. Este manual describe la versión desplegada en AWS y el Bridge simulado incluido en el repositorio.
 
 ## 1. Qué hace el sistema
 
@@ -172,6 +172,12 @@ Flujo recomendado para el agente:
 6. `rename_workspace` cambia el nombre de tu workspace. `delete_workspace` lo retira de la lista activa y bloquea nuevas operaciones; conserva el historial. Si hay tareas activas, completalas o usá `release_task` primero. Solo el dueño puede cambiar o eliminar su workspace. Si corrés un Bridge local, actualizá `BRIDGE_WORKSPACE_NAME` antes de reiniciarlo para evitar crear otro workspace con el nombre anterior.
 
 El cliente puede llamar `heartbeat_agent` para mantener el estado de presencia mientras esté activo. Sin una llamada de presencia durante 45 segundos, el servidor mostrará el agente como offline; podrá volver a conectarse con `connect_agent`. El endpoint expone herramientas, pero no ejecuta modelos ni concede aprobación automática de propuestas. Las aprobaciones siguen siendo humanas desde el panel. Guardá la credencial como una contraseña y revocala si deja de ser necesaria.
+
+### Inbox como recurso MCP
+
+Un cliente MCP compatible puede descubrir `workspace://<workspaceId>/inbox` y `agent://<agentId>/inbox` mediante `resources/list`, y leerlos con `resources/read`. Solo el dueño del workspace y los miembros vigentes del proyecto tienen acceso. El recurso contiene metadatos de hasta 100 mensajes recibidos pendientes, entregados o leídos; para obtener el cuerpo y marcar estados, usá `list_inbox`, `read_message` y `ack_message`.
+
+Los clientes de MCP `2026-07-28` pueden abrir `subscriptions/listen` con `notifications.resourceSubscriptions` para recibir `notifications/resources/updated`. Al recibirla, deben volver a leer el recurso. La conexión dura hasta cinco minutos y luego debe abrirse otra; tras cualquier reconexión, el cliente debe leer el inbox de nuevo, porque las notificaciones no se reproducen. Esta función no inicia Claude ni instala un proceso local. La conexión remota de Claude y el Bridge REST/SSE siguen funcionando como antes.
 
 ## 8. Errores frecuentes y operación
 
