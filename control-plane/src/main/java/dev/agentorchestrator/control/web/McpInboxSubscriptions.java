@@ -3,8 +3,6 @@ package dev.agentorchestrator.control.web;
 import tools.jackson.databind.ObjectMapper;
 import dev.agentorchestrator.control.web.McpInboxResources.InboxRef;
 import jakarta.annotation.PreDestroy;
-import org.springframework.context.event.ContextClosedEvent;
-import org.springframework.context.event.EventListener;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -14,18 +12,20 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.MediaType;
+import org.springframework.context.SmartLifecycle;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /** Notifications are hints. The inbox in PostgreSQL remains the source of truth after reconnects. */
 @Component
-public class McpInboxSubscriptions {
+public class McpInboxSubscriptions implements SmartLifecycle {
     private static final String SUBSCRIPTION_ID = "io.modelcontextprotocol/subscriptionId";
     private static final long LIFETIME_MS = Duration.ofMinutes(5).toMillis();
     private final McpInboxResources resources;
     private final ObjectMapper json;
     private final Set<Subscription> subscriptions = ConcurrentHashMap.newKeySet();
+    private volatile boolean running = true;
 
     private static final class Subscription {
         final Object id;
@@ -45,14 +45,21 @@ public class McpInboxSubscriptions {
         this.json = json;
     }
 
-    @EventListener(ContextClosedEvent.class)
     @PreDestroy
     void closeSubscriptions() {
         for (Subscription sub : List.copyOf(subscriptions)) {
-            subscriptions.remove(sub);
-            sub.emitter.complete();
+            try { finish(sub); }
+            catch (IOException e) {
+                subscriptions.remove(sub);
+                sub.emitter.completeWithError(e);
+            }
         }
     }
+
+    @Override public void start() { running = true; }
+    @Override public void stop() { running = false; closeSubscriptions(); }
+    @Override public boolean isRunning() { return running; }
+    @Override public int getPhase() { return Integer.MAX_VALUE; }
 
     public SseEmitter listen(Object id, Object rawFilter, String owner) {
         if (!(rawFilter instanceof Map<?, ?> filter)) throw ApiProblem.badRequest("notifications filter required");

@@ -1,12 +1,12 @@
 # Agent Orchestrator
 
-Control Plane para coordinar personas y agentes sobre un proyecto compartido. PostgreSQL conserva tareas, presencia, intents, contexto, mensajes y actividad. REST cambia el estado; SSE notifica a Bridges simulados; `/mcp` expone herramientas para clientes MCP.
+Control Plane para coordinar personas y agentes sobre un proyecto compartido. PostgreSQL conserva tareas, presencia, intents, contexto, mensajes y actividad. REST cambia el estado; SSE notifica a Bridges simulados; `/mcp` expone herramientas, recursos e inboxes suscribibles.
 
 **Manual de uso:** [docs/manual-uso.md](docs/manual-uso.md), con acceso al despliegue, alta inicial, panel, Bridge, mensajería, tareas, contexto y MCP.
 
 ## Estado
 
-El MVP cubre claim atómico, dependencias y subtareas, intents con detección de solapamiento, propuestas con aprobación humana y mensajería. El panel permite crear organizaciones, proyectos, tareas, contexto y mensajes; también muestra la red de workspaces y el flujo de servicios. El despliegue AWS está activo en `us-east-1` mediante dos stacks CloudFormation y CodeBuild, con URL pública `https://d3tlsuzwwbes8y.cloudfront.net`. Claude puede conectarse directamente al MCP remoto con una credencial personal revocable; el Bridge local es opcional. El servidor coordina agentes, pero no ejecuta modelos por sí mismo.
+El MVP cubre claim atómico, dependencias y subtareas, intents con detección de solapamiento, propuestas con aprobación humana y mensajería. El panel permite crear organizaciones, proyectos, tareas, contexto y mensajes; también muestra la red de workspaces y el flujo de servicios. El despliegue AWS está activo en `us-east-1` mediante dos stacks CloudFormation y CodeBuild, con URL pública `https://d3tlsuzwwbes8y.cloudfront.net`. Claude puede conectarse directamente al MCP remoto con una credencial personal revocable. El Bridge y el supervisor local para Claude Code son opcionales; el servidor cloud no ejecuta modelos por sí mismo.
 
 ## Requisitos locales
 
@@ -51,7 +51,11 @@ En producción, Spring valida la firma JWT mediante el JWKS del issuer OIDC, emi
 
 `POST /mcp` soporta la negociación `2025-11-25` (`initialize`, herramientas y recursos) y `2026-07-28` (`server/discover`, herramientas, recursos y `subscriptions/listen`). Los inboxes se exponen como `workspace://<id>/inbox` y `agent://<id>/inbox`: el cliente recibe una notificación al llegar un mensaje y vuelve a leer el recurso. PostgreSQL conserva los mensajes durante desconexiones. La versión 2025 se verifica con `io.modelcontextprotocol.sdk:mcp:2.0.1`; la versión 2026 tiene pruebas de protocolo HTTP. Un agente remoto puede registrarse, crear y editar tareas, gestionar dependencias y estados, renombrar o retirar sus workspaces, intercambiar mensajes y proponer contexto. El panel muestra el cuerpo completo de los mensajes a los miembros del proyecto; solo el destinatario puede confirmar mensajes o aceptar transferencias. Ninguna herramienta permite aprobar propuestas.
 
-En producción, el panel crea credenciales personales de 256 bits para MCP. Solo se almacena su hash, expiran a los 90 días, se pueden revocar y únicamente se aceptan en `/mcp`; cada operación sigue comprobando membresía y ownership. Claude puede enviarlas en el encabezado `Authorization: Bearer`. El endpoint también anuncia `/.well-known/oauth-protected-resource` para clientes OAuth compatibles con el callback estático de Cognito. No hay prompts, sesiones ni servidor de autorización propio. El Bridge REST/SSE sigue operativo; el supervisor local que podría despertar Claude será una instalación opcional futura. Los clientes web con `Origin` requieren inclusión exacta en `APP_MCP_ALLOWED_ORIGINS`.
+En producción, el panel crea credenciales personales de 256 bits para MCP. Solo se almacena su hash, expiran a los 90 días, se pueden revocar y únicamente se aceptan en `/mcp`; cada operación sigue comprobando membresía y ownership. Claude puede enviarlas en el encabezado `Authorization: Bearer`. El endpoint también anuncia `/.well-known/oauth-protected-resource` para clientes OAuth compatibles con el callback estático de Cognito. No hay prompts, sesiones ni servidor de autorización propio. El Bridge REST/SSE sigue operativo; el paquete local `workspace-mcp` agrega un supervisor opcional para Claude Code sin alterar la conexión remota existente. Los clientes web con `Origin` requieren inclusión exacta en `APP_MCP_ALLOWED_ORIGINS`.
+
+### Supervisor opcional de Claude Code
+
+`workspace-mcp/` contiene un paquete Node.js sin dependencias externas. Su comando `stdio` actúa como MCP local fino, inicia `workspace-agentd` en segundo plano si falta y reenvía las herramientas al MCP cloud. El daemon mantiene una suscripción MCP al inbox de cada agente vinculado, relee mensajes desde PostgreSQL al reconectar y despierta `claude -p` solo para solicitudes de revisión, ayuda, coordinación o handoff. Reutiliza el `session_id` de Claude por agente. `connect_agent` vincula automáticamente el agente con el directorio local; también existe `workspace-mcp bind`. No modifica el conector remoto de Claude ni el Bridge. El paquete se sirve desde `/downloads/workspace-mcp.tgz` en la imagen de producción; la instalación y los límites se describen en el manual.
 
 ## AWS
 

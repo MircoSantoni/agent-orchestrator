@@ -1,0 +1,9 @@
+{
+  "name": "@mircosantoni/agent-orchestrator-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "workspace-mcp": "./src/cli.mjs" },
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test" }
+}

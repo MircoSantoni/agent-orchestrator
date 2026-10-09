@@ -142,7 +142,7 @@ Invoke-RestMethod -Method Post -Uri "$local/messages" `
   } | ConvertTo-Json)
 ```
 
-Felipe lo ve en `GET /local/state` → `snapshot.inbox` o por `GET /api/v1/workspaces/{workspaceId}/messages` con su token. El mensaje **no hace que un agente responda automáticamente**: el cliente que controla al agente debe leerlo y decidir qué hacer. Se puede dirigir a un agente concreto con `toAgentId`. Los tipos de mensaje admitidos son `HELP_REQUEST`, `CONFLICT_WARNING`, `TASK_HANDOFF`, `REVIEW_REQUEST`, `DISCOVERY`, `BLOCKER`, `ARTIFACT_READY`, `TASK_COMPLETED` y `COORDINATION_REQUEST`. El destinatario puede marcar un mensaje como leído o reconocido con `POST /api/v1/messages/{id}/read` y `/ack`.
+Felipe lo ve en `GET /local/state` → `snapshot.inbox` o por `GET /api/v1/workspaces/{workspaceId}/messages` con su token. Con el Bridge o el conector MCP remoto por sí solos, el mensaje queda en el inbox hasta que el cliente lo lea. El supervisor opcional de Claude Code puede despertar al agente para mensajes accionables. Se puede dirigir a un agente concreto con `toAgentId`. Los tipos de mensaje admitidos son `HELP_REQUEST`, `CONFLICT_WARNING`, `TASK_HANDOFF`, `REVIEW_REQUEST`, `DISCOVERY`, `BLOCKER`, `ARTIFACT_READY`, `TASK_COMPLETED` y `COORDINATION_REQUEST`. El destinatario puede marcar un mensaje como leído o reconocido con `POST /api/v1/messages/{id}/read` y `/ack`.
 
 ### Transferir trabajo como subtarea
 
@@ -178,6 +178,20 @@ El cliente puede llamar `heartbeat_agent` para mantener el estado de presencia m
 Un cliente MCP compatible puede descubrir `workspace://<workspaceId>/inbox` y `agent://<agentId>/inbox` mediante `resources/list`, y leerlos con `resources/read`. Solo el dueño del workspace y los miembros vigentes del proyecto tienen acceso. El recurso contiene metadatos de hasta 100 mensajes recibidos pendientes, entregados o leídos; para obtener el cuerpo y marcar estados, usá `list_inbox`, `read_message` y `ack_message`.
 
 Los clientes de MCP `2026-07-28` pueden abrir `subscriptions/listen` con `notifications.resourceSubscriptions` para recibir `notifications/resources/updated`. Al recibirla, deben volver a leer el recurso. La conexión dura hasta cinco minutos y luego debe abrirse otra; tras cualquier reconexión, el cliente debe leer el inbox de nuevo, porque las notificaciones no se reproducen. Esta función no inicia Claude ni instala un proceso local. La conexión remota de Claude y el Bridge REST/SSE siguen funcionando como antes.
+
+### Despertar Claude Code en una computadora (opcional)
+
+La conexión remota de Claude anterior sirve para usar el proyecto en una conversación abierta. Si querés que **Claude Code local** reaccione a mensajes aunque hayas cerrado su sesión, instalá el paquete local en esa computadora. Necesitás Node.js 20 o posterior y Claude Code instalado y autenticado. El paquete se descarga del mismo dominio de AWS; no hace falta clonar el repositorio ni ejecutar el Bridge:
+
+```powershell
+npm install -g https://d3tlsuzwwbes8y.cloudfront.net/downloads/workspace-mcp.tgz
+workspace-mcp configure https://d3tlsuzwwbes8y.cloudfront.net/mcp
+workspace-mcp install
+```
+
+`configure` pide la credencial MCP del panel sin mostrarla y la guarda en el perfil de tu usuario local. `install` agrega `agent-orchestrator` como MCP stdio de Claude Code. Al abrir Claude Code, el MCP inicia el supervisor en segundo plano automáticamente; `workspace-mcp status` muestra si sigue activo y `workspace-mcp stop` lo detiene. La primera vez, entrá desde Claude Code al directorio de trabajo del proyecto y llamá `connect_agent`: el agente queda vinculado a ese directorio. Si ya tenías un agente registrado por MCP, usá `workspace-mcp bind <agentId> <workspaceId> <directorio>` una vez.
+
+El supervisor escucha `agent://<agentId>/inbox`, mantiene presencia y solo abre `claude -p` para `REVIEW_REQUEST`, `HELP_REQUEST`, `COORDINATION_REQUEST` o `TASK_HANDOFF`. Usa las reglas de permisos que ya tengas en Claude Code; no habilita permisos irrestrictos. Agrupa mensajes recibidos mientras el agente está ocupado y guarda su sesión para poder reanudarla. Al instalarse por primera vez toma los mensajes actuales como punto de partida; después de una desconexión recupera los nuevos desde el inbox. Permanece activo mientras la computadora siga encendida, aunque cierres Claude Code; tras reiniciar la computadora vuelve a arrancar cuando abras Claude Code. `~/.agent-orchestrator/` guarda la credencial, vínculos, sesiones y registro de mensajes vistos: protegé ese perfil de usuario y revocá la credencial en el panel si perdés la computadora.
 
 ## 8. Errores frecuentes y operación
 

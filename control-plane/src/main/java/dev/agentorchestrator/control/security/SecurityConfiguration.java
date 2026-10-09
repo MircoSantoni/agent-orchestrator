@@ -33,6 +33,7 @@ public class SecurityConfiguration {
         return http.csrf(csrf -> csrf.disable()).cors(Customizer.withDefaults())
                 .authorizeHttpRequests(auth -> auth.requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/", "/index.html", "/app.js", "/styles.css", "/public/config",
+                                "/downloads/workspace-mcp.tgz", "/downloads/workspace-mcp.md",
                                 "/.well-known/oauth-protected-resource").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex.authenticationEntryPoint((request, response, error) -> {
