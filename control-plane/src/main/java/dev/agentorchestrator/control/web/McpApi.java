@@ -28,14 +28,19 @@ public class McpApi {
     private final Store store;
     private final CoordinationService coordination;
     private final Actor actor;
+    private final McpInboxResources inboxResources;
+    private final McpInboxSubscriptions inboxSubscriptions;
     private final List<String> allowedOrigins;
     private final List<Map<String, Object>> tools;
 
     public McpApi(Store store, CoordinationService coordination, Actor actor,
+                  McpInboxResources inboxResources, McpInboxSubscriptions inboxSubscriptions,
                   @Value("${app.mcp.allowed-origins:}") String allowedOrigins) {
         this.store = store;
         this.coordination = coordination;
         this.actor = actor;
+        this.inboxResources = inboxResources;
+        this.inboxSubscriptions = inboxSubscriptions;
         this.allowedOrigins = allowedOrigins.isBlank() ? List.of() :
                 List.of(allowedOrigins.split(",")).stream().map(String::trim).toList();
         this.tools = List.of(
@@ -69,8 +74,9 @@ public class McpApi {
                 tool("accept_handoff", "Accept a handoff message and create its child task", fields("messageId", "string"), "messageId"));
     }
 
-    @PostMapping(value = "/mcp", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<Map<String, Object>> mcp(@RequestBody Map<String, Object> request,
+    @PostMapping(value = "/mcp", consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = {MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_EVENT_STREAM_VALUE})
+    public ResponseEntity<?> mcp(@RequestBody Map<String, Object> request,
             @RequestHeader(value = "MCP-Protocol-Version", required = false) String versionHeader,
             @RequestHeader(value = "Mcp-Method", required = false) String methodHeader,
             @RequestHeader(value = "Mcp-Name", required = false) String nameHeader,
@@ -93,24 +99,30 @@ public class McpApi {
             return error(HttpStatus.BAD_REQUEST, id, -32020, "MCP headers do not match request");
         if (!(meta.get(CAPABILITIES_KEY) instanceof Map<?, ?>))
             return error(HttpStatus.BAD_REQUEST, id, -32602, "Client capabilities required");
-        if ("tools/call".equals(method)) {
-            if (!(params.get("name") instanceof String name) || !name.equals(decoded(nameHeader)))
+        if ("tools/call".equals(method) || "resources/read".equals(method)) {
+            Object name = "tools/call".equals(method) ? params.get("name") : params.get("uri");
+            if (!(name instanceof String text) || !text.equals(decoded(nameHeader)))
                 return error(HttpStatus.BAD_REQUEST, id, -32020, "Mcp-Name does not match request");
         }
         // Authentication is enforced by Spring Security; Actor validates OAuth JWTs or scoped MCP credentials.
         actor.sub();
         return switch (method) {
             case "server/discover" -> ok(id, Map.of("resultType", "complete", "supportedVersions", List.of(VERSION),
-                    "capabilities", Map.of("tools", Map.of("listChanged", false)), "ttlMs", 0, "cacheScope", "private"));
+                    "capabilities", Map.of("tools", Map.of("listChanged", false),
+                            "resources", Map.of("listChanged", false, "subscribe", true)), "ttlMs", 0, "cacheScope", "private"));
             case "tools/list" -> ok(id, Map.of("resultType", "complete", "tools", tools, "ttlMs", 0, "cacheScope", "private"));
             case "tools/call" -> call(id, params, false);
+            case "resources/list" -> ok(id, Map.of("resultType", "complete", "resources", inboxResources.list(),
+                    "ttlMs", 0, "cacheScope", "private"));
+            case "resources/read" -> resourceRead(id, params, false);
+            case "subscriptions/listen" -> subscription(id, params);
             default -> error(HttpStatus.NOT_FOUND, id, -32601, "Method not found");
         };
     }
 
     private boolean legacy(Map<String, Object> request, String versionHeader, String method) {
         if ("initialize".equals(method)) return true;
-        if (!List.of("tools/list", "tools/call").contains(method)) return false;
+        if (!List.of("tools/list", "tools/call", "resources/list", "resources/read").contains(method)) return false;
         if (LEGACY_VERSION.equals(versionHeader)) return true;
         if (versionHeader != null) return false;
         return request.get("params") instanceof Map<?, ?> params && !params.containsKey("_meta");
@@ -121,11 +133,41 @@ public class McpApi {
         if (!(rawParams instanceof Map<?, ?> params)) return error(HttpStatus.BAD_REQUEST, id, -32602, "Params object required");
         return switch (method) {
             case "initialize" -> legacyOk(id, Map.of("protocolVersion", LEGACY_VERSION,
-                    "capabilities", Map.of("tools", Map.of("listChanged", false)), "serverInfo", SERVER_INFO));
+                    "capabilities", Map.of("tools", Map.of("listChanged", false),
+                            "resources", Map.of("listChanged", false, "subscribe", false)), "serverInfo", SERVER_INFO));
             case "tools/list" -> legacyOk(id, Map.of("tools", tools));
             case "tools/call" -> call(id, params, true);
+            case "resources/list" -> legacyOk(id, Map.of("resources", inboxResources.list()));
+            case "resources/read" -> resourceRead(id, params, true);
             default -> error(HttpStatus.NOT_FOUND, id, -32601, "Method not found");
         };
+    }
+
+    private ResponseEntity<Map<String, Object>> resourceRead(Object id, Map<?, ?> params, boolean legacy) {
+        try {
+            if (!(params.get("uri") instanceof String uri)) throw ApiProblem.badRequest("Resource URI required");
+            var ref = inboxResources.authorized(uri);
+            Map<String, Object> contents = Map.of("uri", ref.uri(), "mimeType", "application/json",
+                    "text", inboxResources.read(ref));
+            Map<String, Object> result = legacy ? Map.of("contents", List.of(contents)) :
+                    Map.of("resultType", "complete", "contents", List.of(contents), "ttlMs", 0, "cacheScope", "private");
+            return legacy ? legacyOk(id, result) : ok(id, result);
+        } catch (ApiProblem e) {
+            return error(e.status(), id, -32602, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return error(HttpStatus.BAD_REQUEST, id, -32602, e.getMessage());
+        }
+    }
+
+    private ResponseEntity<?> subscription(Object id, Map<?, ?> params) {
+        try {
+            return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM)
+                    .body(inboxSubscriptions.listen(id, params.get("notifications"), actor.sub()));
+        } catch (ApiProblem e) {
+            return error(e.status(), id, -32602, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return error(HttpStatus.BAD_REQUEST, id, -32602, e.getMessage());
+        }
     }
 
     private ResponseEntity<Map<String, Object>> call(Object id, Map<?, ?> params, boolean legacy) {
@@ -295,10 +337,12 @@ public class McpApi {
     private static ResponseEntity<Map<String, Object>> ok(Object id, Map<String, Object> result) {
         Map<String, Object> value = new LinkedHashMap<>(result);
         value.put("_meta", Map.of("io.modelcontextprotocol/serverInfo", SERVER_INFO));
-        return ResponseEntity.ok(Map.of("jsonrpc", "2.0", "id", id, "result", value));
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("jsonrpc", "2.0", "id", id, "result", value));
     }
     private static ResponseEntity<Map<String, Object>> legacyOk(Object id, Map<String, Object> result) {
-        return ResponseEntity.ok(Map.of("jsonrpc", "2.0", "id", id, "result", result));
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("jsonrpc", "2.0", "id", id, "result", result));
     }
     private static ResponseEntity<Map<String, Object>> error(HttpStatus status, Object id, int code, String message) {
         return error(status, id, code, message, Map.of());
@@ -310,6 +354,6 @@ public class McpApi {
         problem.put("code", code); problem.put("message", message);
         if (!data.isEmpty()) problem.put("data", data);
         body.put("error", problem);
-        return ResponseEntity.status(status).body(body);
+        return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON).body(body);
     }
 }

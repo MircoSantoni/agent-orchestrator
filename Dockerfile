@@ -4,6 +4,13 @@ COPY pom.xml ./
 COPY control-plane/pom.xml control-plane/pom.xml
 COPY agent-bridge/pom.xml agent-bridge/pom.xml
 COPY control-plane/src control-plane/src
+COPY workspace-mcp workspace-mcp
+COPY workspace-mcp/README.md control-plane/src/main/resources/static/downloads/workspace-mcp.md
+COPY LICENSE LICENSE
+RUN mkdir -p /tmp/package /src/control-plane/src/main/resources/static/downloads \
+    && cp workspace-mcp/package.json workspace-mcp/README.md LICENSE /tmp/package/ \
+    && cp -r workspace-mcp/src /tmp/package/ \
+    && tar -C /tmp -czf /src/control-plane/src/main/resources/static/downloads/workspace-mcp.tgz package
 RUN mvn -q -pl control-plane -am package -DskipTests
 
 FROM public.ecr.aws/docker/library/eclipse-temurin:25-jre
